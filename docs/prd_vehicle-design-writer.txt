@@ -1,0 +1,2604 @@
+【Cursor Goal Mode｜汽车设计内容评价与风格生成桌面端 APP｜PRD级端到端开发提示词】
+
+你现在进入 GOAL / AGENT 模式。
+
+你的任务不是给我输出开发建议，而是直接完成一个可以运行的 Electron 桌面端 MVP。你负责从需求分析、技术架构、UI、数据库、文件导入、视觉模型分析、LLM 接入、PFDBI 分析、Style DNA 提取、文案生成、质量检查、测试、打包到 README 的端到端实现。
+
+项目名称暂定：
+Vehicle Design Writer
+
+中文名暂定：
+汽车设计文案助手
+
+==================================================
+一、产品定位
+==================================================
+
+这是一个面向“汽车设计与审美”内容团队的桌面端 AI 内容生产工具。
+
+核心不是普通 AI 写作，而是：
+
+汽车设计评价框架 PFDBI
++
+车型视觉分析
++
+博主 Style DNA
++
+结构化内容模板
++
+平台与时长约束
+
+帮助用户完成：
+
+用户输入选题 + 初步草稿 + 目标时长
++
+可选上传对应车型参考图
+↓
+视觉模型理解车辆设计
+↓
+PFDBI 设计评价分析
+↓
+生成 Base Draft
+↓
+匹配某位博主的 Style DNA + 对应结构模板
+↓
+Style Adapter 风格适配
+↓
+时长 / 字数 / 事实 / 风格质量检查
+↓
+生成可编辑的视频成稿
+
+同时支持：
+
+导入某位博主的多篇历史完整文案
+↓
+自动解析与清洗
+↓
+多文案结构分析
+↓
+Writing DNA 聚合
+↓
+生成一个“博主级 Style DNA”
+↓
+从该 Style DNA 中进一步生成多个“场景化 Structure Templates”
+↓
+形成 Few-shot Examples
+↓
+保存到风格库
+↓
+后续按题材自动选择合适模板
+
+==================================================
+二、核心产品理念
+==================================================
+
+整个产品严格区分：
+
+【内容逻辑】
+PFDBI 决定：
+讲什么
+为什么讲
+从什么设计证据推出什么判断
+
+↓
+
+【视觉证据】
+车型参考图决定：
+看到了什么
+哪些设计特征值得分析
+
+↓
+
+【表达方式】
+Style DNA 决定：
+怎么说
+怎么组织语言
+如何建立节奏与情绪
+
+↓
+
+【最终成稿】
+Platform + Duration 决定：
+在哪个平台说
+说多长
+
+因此产品不是：
+
+“模仿博主写文章”
+
+而是：
+
+“先把汽车设计逻辑想清楚，再用目标创作者的稳定风格表达出来”。
+
+==================================================
+三、第一原则：不得把风格做成一个简单 Prompt
+==================================================
+
+不要实现：
+
+“请模仿 XXX 博主”。
+
+必须实现：
+
+Style DNA
++
+Structure Template
++
+Few-shot Examples
++
+Platform Profile
++
+Dynamic Style Adapter
+
+==================================================
+四、技术栈
+==================================================
+
+优先：
+
+Electron
+React
+TypeScript
+Vite
+
+UI：
+
+Tailwind CSS
+shadcn/ui
+
+状态管理：
+
+Zustand
+
+本地数据库：
+
+SQLite
+
+优先：
+better-sqlite3
+
+如果 Electron 原生编译存在问题：
+采用兼容方案，但必须保持本地 SQLite 架构。
+
+数据层：
+
+Repository Pattern
+
+校验：
+
+Zod
+
+LLM Provider：
+
+SiliconFlow
+
+不要把产品代码与某个具体模型强绑定。
+
+采用：
+
+LLMProvider
+
+例如：
+
+LLMProvider
+├── SiliconFlowProvider
+└── MockLLMProvider
+
+SiliconFlow 作为统一模型服务商。
+
+文字模型与视觉模型都从 SiliconFlow 调用。
+
+所有模型名称必须配置化。
+
+不能把某个模型型号永久写死。
+
+用户可以在设置页分别配置：
+
+Text Model
+Vision Model
+
+未来支持：
+
+Reasoning Model
+OCR Model
+Embedding Model
+
+==================================================
+五、SiliconFlow 接入要求
+==================================================
+
+SiliconFlow 是模型聚合服务。
+
+默认 Base URL：
+
+https://api.siliconflow.cn/v1
+
+但不要硬编码为不可修改。
+
+设置页：
+
+Provider：
+SiliconFlow
+
+API Key：
+********
+
+Base URL：
+https://api.siliconflow.cn/v1
+
+Text Model：
+用户自行填写 / 从模型列表选择
+
+Vision Model：
+用户自行填写 / 从模型列表选择
+
+调用层应采用 OpenAI-compatible client abstraction。
+
+不要假设所有模型拥有完全相同能力。
+
+必须定义：
+
+ModelCapability
+
+例如：
+
+{
+  supportsText: true,
+  supportsVision: false,
+  supportsVideo: false,
+  supportsJson: true,
+  supportsStreaming: true
+}
+
+在调用前检查能力。
+
+视觉任务如果模型不支持 vision：
+
+明确提示用户。
+
+==================================================
+六、视觉模型能力
+==================================================
+
+新增核心能力：
+
+“车型参考图分析”。
+
+用户在创建文案时可以：
+
+上传 1 张或多张车型参考图片。
+
+支持：
+
+PNG
+JPG
+JPEG
+WEBP
+
+单个项目允许多张图片。
+
+图片类型可以是：
+
+- 官方车型图
+- 正侧后视图
+- 设计草图
+- 车型宣传图
+- 局部细节图
+- 对比图
+
+第一版重点：
+
+整车外观设计分析。
+
+不要求视觉模型准确识别具体车型身份。
+
+如果模型无法确认车型：
+
+标记：
+
+“车型身份待确认”
+
+不要虚构品牌、车型、年份。
+
+==================================================
+七、视觉分析 Workflow
+==================================================
+
+用户上传：
+
+Reference Images
+
+↓
+Image Pre-processing
+
+↓
+Vision Model Analysis
+
+↓
+Image Observation
+
+↓
+PFDBI Mapping
+
+↓
+Visual Evidence Pack
+
+↓
+Text LLM
+
+↓
+PFDBI Analysis
+
+这里要特别注意：
+
+视觉模型负责：
+
+“看到什么”
+
+文本模型负责：
+
+“如何解释”
+
+避免一个模型承担所有工作。
+
+==================================================
+八、视觉模型输出 Schema
+==================================================
+
+必须结构化。
+
+VisionObservation：
+
+{
+  "imageId": "",
+  "viewType": "",
+  "vehicleIdentification": {
+    "brand": "",
+    "model": "",
+    "confidence": 0
+  },
+
+  "overall": {
+    "silhouette": "",
+    "proportion": "",
+    "stance": "",
+    "visualCenterOfGravity": ""
+  },
+
+  "proportion": {
+    "wheelSize": "",
+    "wheelPlacement": "",
+    "cabPosition": "",
+    "frontRearOverhang": "",
+    "bodyHeightWidthRelationship": ""
+  },
+
+  "form": {
+    "majorVolumes": [],
+    "surfacing": [],
+    "characterLines": [],
+    "shoulder": "",
+    "roofline": "",
+    "wheelArch": ""
+  },
+
+  "detail": {
+    "headlamp": "",
+    "taillamp": "",
+    "frontGraphic": "",
+    "wheelDesign": "",
+    "windowGraphic": "",
+    "decorativeElements": []
+  },
+
+  "cmf": {
+    "color": "",
+    "material": "",
+    "finish": ""
+  },
+
+  "visualHierarchy": {
+    "primaryFocus": "",
+    "secondaryFocus": "",
+    "visualNoise": ""
+  },
+
+  "observations": [],
+  "uncertainties": []
+}
+
+重要：
+
+Vision Model 不能直接输出最终审美结论。
+
+第一阶段只能输出：
+
+观察
+证据
+不确定性
+
+==================================================
+九、PFDBI 核心体系
+==================================================
+
+PFDBI 是产品核心知识框架。
+
+P = Proportion
+比例与姿态
+
+F = Form
+形体与型面
+
+D = Detail
+图形与细节
+
+B = Brand / Brief
+品牌与产品任务
+
+I = Innovation
+创新与辨识度
+
+评价链：
+
+设计事实
+→ 审美感受
+→ 设计判断
+
+必须严格区分：
+
+事实
+推断
+个人偏好
+
+==================================================
+十、PFDBI Workflow
+==================================================
+
+输入：
+
+用户选题
++
+用户初步草稿
++
+车型参考图的视觉观察结果
++
+车型 / 品牌信息（若用户提供）
++
+平台
++
+内容类型
++
+目标时长
+
+↓
+
+PFDBI Analyzer
+
+输出：
+
+PFDBIAnalysis
+
+{
+  "topic": "",
+  "coreQuestion": "",
+  "targetAudience": "",
+
+  "P": {
+    "observations": [],
+    "evidence": [],
+    "interpretation": "",
+    "aestheticEffect": "",
+    "judgement": ""
+  },
+
+  "F": {
+    "observations": [],
+    "evidence": [],
+    "interpretation": "",
+    "aestheticEffect": "",
+    "judgement": ""
+  },
+
+  "D": {
+    "observations": [],
+    "evidence": [],
+    "interpretation": "",
+    "aestheticEffect": "",
+    "judgement": ""
+  },
+
+  "B": {
+    "observations": [],
+    "evidence": [],
+    "interpretation": "",
+    "aestheticEffect": "",
+    "judgement": ""
+  },
+
+  "I": {
+    "observations": [],
+    "evidence": [],
+    "interpretation": "",
+    "aestheticEffect": "",
+    "judgement": ""
+  },
+
+  "aestheticKeywords": [],
+  "comparisons": [],
+  "counterArguments": [],
+
+  "facts": [],
+  "inferences": [],
+  "personalPreferences": [],
+
+  "coreConclusion": "",
+  "contentOutline": []
+}
+
+必须允许某一维度：
+
+“不适用 / 暂无足够证据”。
+
+不能强行凑满 P/F/D/B/I。
+
+==================================================
+十一、PFDBI 评价的真正目标
+==================================================
+
+系统不要简单给汽车“打分”。
+
+核心是建立：
+
+为什么这么判断
+
+例如：
+
+P：
+前轮位置、轴距、前后悬造成什么姿态
+
+↓
+
+F：
+体量、肩部和曲面形成什么视觉张力
+
+↓
+
+D：
+灯组与细节如何强化 / 破坏整体
+
+↓
+
+B：
+是否符合品牌和产品定位
+
+↓
+
+I：
+是否真正创造新的设计表达
+
+↓
+
+最终设计结论
+
+如果未来需要分数：
+
+评分只能作为辅助。
+
+默认不要强制输出 100 分制。
+
+==================================================
+十二、Style DNA 数据结构
+==================================================
+
+一个博主只有一个 Style DNA 主档案。
+
+Style DNA 下可以存在多个场景化 Structure Templates。
+
+StyleProfile：
+
+{
+  "creator": {
+    "name": "",
+    "platform": "",
+    "description": ""
+  },
+
+  "tone": {
+    "professionalism": 0,
+    "emotion": 0,
+    "humor": 0,
+    "sarcasm": 0,
+    "warmth": 0,
+    "aggressiveness": 0
+  },
+
+  "language": {
+    "sentenceLength": "",
+    "rhythm": "",
+    "vocabularyDensity": "",
+    "technicalTermDensity": "",
+    "metaphorFrequency": "",
+    "colloquialism": "",
+    "firstPersonUsage": "",
+    "secondPersonUsage": ""
+  },
+
+  "argumentation": {
+    "opinionVsFact": "",
+    "opinionPosition": "",
+    "evidenceUsage": "",
+    "comparisonFrequency": "",
+    "counterArgumentUsage": "",
+    "reversalFrequency": ""
+  },
+
+  "rhetoric": {
+    "hookPatterns": [],
+    "transitionPatterns": [],
+    "reversalPatterns": [],
+    "analogyPatterns": [],
+    "endingPatterns": [],
+    "ctaPatterns": []
+  },
+
+  "automotiveDesign": {
+    "proportionAnalysis": "",
+    "formAnalysis": "",
+    "detailAnalysis": "",
+    "brandAnalysis": "",
+    "innovationAnalysis": ""
+  },
+
+  "commercial": {
+    "sponsoredStyle": "",
+    "integrationPatterns": [],
+    "brandMentionTiming": "",
+    "ctaStyle": ""
+  },
+
+  "signaturePatterns": [],
+  "avoidPatterns": [],
+
+  "evidenceReferences": []
+}
+
+这些数值不是客观事实。
+
+UI 中明确写：
+
+“AI 分析指标，用于辅助理解风格特征。”
+
+==================================================
+十三、Structure Templates
+==================================================
+
+不要一个博主只有一个模板。
+
+一个 Style DNA 下必须支持多个场景模板。
+
+例如：
+
+Template A：
+热点设计评论
+
+Template B：
+单车型设计深度分析
+
+Template C：
+双车设计比较
+
+Template D：
+品牌设计语言分析
+
+Template E：
+汽车设计史 / 经典车型
+
+Template F：
+商业合作内容
+
+StructureTemplate：
+
+{
+  "templateName": "",
+  "scenario": "",
+  "applicableTopics": [],
+  "durationRange": "",
+  "sections": [
+    {
+      "name": "Hook",
+      "timePercent": 0.05,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Problem",
+      "timePercent": 0.10,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Context",
+      "timePercent": 0.10,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "MainArgument",
+      "timePercent": 0.20,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Evidence",
+      "timePercent": 0.20,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Analysis",
+      "timePercent": 0.20,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Reversal",
+      "timePercent": 0.05,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "Conclusion",
+      "timePercent": 0.07,
+      "purpose": "",
+      "instruction": ""
+    },
+    {
+      "name": "CTA",
+      "timePercent": 0.03,
+      "purpose": "",
+      "instruction": ""
+    }
+  ]
+}
+
+允许模板有不同结构，不要求所有模板严格包含全部 section。
+
+==================================================
+十四、Style Extraction 工作流
+==================================================
+
+功能名称：
+
+“新增写作风格”
+
+第一步：
+
+创建博主
+
+输入：
+
+博主名称
+平台
+类别
+备注
+
+第二步：
+
+选择文案文件夹
+
+支持：
+
+.txt
+.md
+.rtf
+
+至少：
+
+1 个
+
+推荐：
+
+3~20 个
+
+第三步：
+
+扫描文件
+
+显示：
+
+文件数量
+总字数
+单文件字数
+解析状态
+
+第四步：
+
+文本清洗
+
+第五步：
+
+单文案分析
+
+第六步：
+
+多文案聚合
+
+第七步：
+
+Style DNA
+
+第八步：
+
+Structure Templates
+
+第九步：
+
+Few-shot Examples
+
+第十步：
+
+质量检查
+
+第十一步：
+
+存储
+
+==================================================
+十五、Reference to writing-dna-skill
+==================================================
+
+产品思路参考：
+
+writing-dna-skill
+
+但不能照抄。
+
+需要自己重新设计：
+
+“汽车视频博主风格 DNA 提取”。
+
+尤其强调：
+
+区分：
+主题
+专业知识
+作者个人风格
+
+例如：
+
+“汽车专业术语多”
+
+不一定是作者个人风格。
+
+应该继续分析：
+
+作者如何组织这些术语。
+
+最终提取：
+
+稳定特征
+
+而不是：
+
+某篇文章的偶然写法。
+
+==================================================
+十六、Style DNA 质量检查
+==================================================
+
+生成 Style DNA 后，必须做第二次 LLM Review。
+
+检查：
+
+1. 是否来自多个样本？
+2. 是否只是单篇偶然特征？
+3. 是否混淆主题与风格？
+4. 是否把汽车术语当成作者独特性？
+5. 是否有过度概括？
+6. 是否存在模型自行脑补？
+7. 是否能追溯到 source documents？
+
+每个主要风格结论：
+
+尽量保存：
+
+evidenceReferences
+
+例如：
+
+{
+  "feature": "观点先行",
+  "evidenceReferences": [
+    "doc_03",
+    "doc_07",
+    "doc_09"
+  ]
+}
+
+==================================================
+十七、Few-shot Examples
+==================================================
+
+从源文案中挑选代表性片段。
+
+禁止：
+
+整篇复制。
+
+建议：
+
+短片段。
+
+每个 Example：
+
+{
+  "sourceDocumentId": "",
+  "scenario": "",
+  "structure": "",
+  "excerpt": "",
+  "whyRepresentative": ""
+}
+
+Few-shot 主要用于：
+
+帮助模型理解结构与表达方式。
+
+不是让模型记忆并复写原文。
+
+==================================================
+十八、文案生产 Workflow
+==================================================
+
+用户点击：
+
+“新建文案”
+
+输入：
+
+1. 选题描述
+2. 初步草稿
+3. 平台
+4. 目标时长
+5. 文案类型
+6. Style DNA
+7. 车型图片
+8. 可选车型 / 品牌资料
+
+↓
+
+Step 1：
+读取视觉信息
+
+↓
+
+Step 2：
+PFDBI 分析
+
+↓
+
+Step 3：
+生成 Base Draft
+
+↓
+
+Step 4：
+根据题材自动匹配 Structure Template
+
+↓
+
+Step 5：
+Style Adapter
+
+↓
+
+Step 6：
+Duration Check
+
+↓
+
+Step 7：
+Quality Check
+
+↓
+
+Step 8：
+Final Script
+
+==================================================
+十九、内容生成阶段禁止一步到位
+==================================================
+
+禁止：
+
+选题
++
+图片
++
+Style
+→
+一次 Prompt
+→
+最终文案
+
+必须：
+
+Visual Observation
+→
+PFDBI Analysis
+→
+Base Draft
+→
+Template Selection
+→
+Style Adaptation
+→
+Quality Check
+
+这条规则必须在架构层落实。
+
+==================================================
+二十、Base Draft
+==================================================
+
+Base Draft 暂时：
+
+不追求模仿博主。
+
+只追求：
+
+- 内容逻辑清楚
+- PFDBI 逻辑完整
+- 观点明确
+- 事实 / 推断 / 偏好分离
+- 视觉证据充分
+- 有故事性
+- 目标时长匹配
+
+Base Draft 必须有：
+
+outline
++
+script
++
+pfdbiReferences
+
+==================================================
+二十一、Style Adapter
+==================================================
+
+输入：
+
+Base Draft
++
+Style DNA
++
+Structure Template
++
+Few-shot Examples
++
+Platform Profile
++
+Duration Profile
+
+输出：
+
+Final Draft
+
+必须：
+
+保持：
+- 事实
+- 视觉证据
+- PFDBI 逻辑
+- 核心结论
+
+可以改变：
+- Hook
+- 句式
+- 节奏
+- 结构组织
+- 情绪
+- 幽默
+- 转折
+- CTA
+
+不能因为风格迁移改变：
+
+原始事实。
+
+==================================================
+二十二、平台 Profile
+==================================================
+
+平台：
+
+B站
+抖音
+小红书
+YouTube
+X
+
+PlatformProfile：
+
+{
+  "platform": "",
+  "contentLength": "",
+  "hookDensity": "",
+  "informationDensity": "",
+  "paragraphLength": "",
+  "ctaStyle": "",
+  "titleStyle": ""
+}
+
+所有配置都可以未来在 UI 中修改。
+
+==================================================
+二十三、时长控制
+==================================================
+
+系统根据：
+
+平台
++
+语言
++
+内容类型
+
+估算：
+
+wordsPerMinute
+
+默认中文：
+
+260~320 字/分钟
+
+但必须配置化。
+
+建立：
+
+DurationProfile
+
+用户可以修改。
+
+最终显示：
+
+目标：
+
+1800 字
+
+实际：
+
+1765 字
+
+预计：
+
+6分12秒
+
+误差：
+
+-1.9%
+
+允许：
+
+±5%
+±10%
+
+超出时：
+
+显示警告。
+
+可以：
+
+“自动压缩”
+
+“自动扩写”
+
+==================================================
+二十四、图像 + PFDBI 联动
+==================================================
+
+在 PFDBI 页面显示：
+
+图片
+
+↓
+
+Vision Observations
+
+↓
+
+PFDBI Mapping
+
+例如：
+
+P：
+“车轮尺寸与车身比例偏大……”
+
+F：
+“肩部型面呈现……”
+
+D：
+“头灯采用……”
+
+B：
+“……”
+
+I：
+“……”
+
+每条判断可以点击：
+
+“查看视觉证据”
+
+显示：
+
+对应图片
++
+对应观察
+
+==================================================
+二十五、用户图片标注
+==================================================
+
+允许用户：
+
+在车型图片上：
+
+- 框选区域
+- 添加备注
+- 指定“这里重点分析”
+- 指定“不要分析这里”
+
+第一版可以做矩形框选。
+
+用户标注：
+
+{
+  "imageId": "",
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0,
+  "note": ""
+}
+
+Vision Prompt 中把这些信息传入。
+
+==================================================
+二十六、脚本编辑器
+==================================================
+
+Final Script 页面：
+
+左：
+
+项目参数 / Style / PFDBI
+
+中：
+
+Script Editor
+
+右：
+
+PFDBI Analysis / Quality
+
+支持：
+
+编辑
+自动保存
+字数统计
+预计时长
+复制
+导出
+版本管理
+
+选中一段文本：
+
+提供：
+
+“重写这一段”
+
+“更口语”
+
+“更专业”
+
+“增加冲突”
+
+“压缩”
+
+“扩写”
+
+“重新写 Hook”
+
+“重新写结尾”
+
+仅对选择区域处理。
+
+==================================================
+二十七、版本系统
+==================================================
+
+每次：
+
+PFDBI
+Base Draft
+Style Adaptation
+Manual Edit
+
+都可以形成版本。
+
+例如：
+
+V1 Base Draft
+V2 Style Adapted
+V3 Manual
+V4 New Hook
+
+支持：
+
+比较
+恢复
+复制
+
+==================================================
+二十八、质量检查
+==================================================
+
+最终生成后：
+
+QualityCheck
+
+检查：
+
+1. 时长
+2. 字数
+3. PFDBI 覆盖
+4. 风格一致性
+5. 内容完整性
+6. 事实风险
+7. 无依据参数
+8. 套话风险
+9. AI腔
+10. 与源文案过度接近风险
+
+QualityReport：
+
+{
+  "durationScore": 0,
+  "pfdbiCoverage": {},
+  "styleConsistency": 0,
+  "factRisk": [],
+  "genericPhraseRisk": [],
+  "copyRisk": [],
+  "suggestions": []
+}
+
+特别注意：
+
+模型不能自行验证事实。
+
+如果输入中没有事实来源：
+
+标记：
+
+“待核实”
+
+不能编造。
+
+==================================================
+二十九、商单模式
+==================================================
+
+支持：
+
+“商业合作模式”
+
+用户可以输入：
+
+品牌
+车型
+合作目标
+核心卖点
+必须出现信息
+不能出现信息
+植入时间
+CTA
+
+工作流：
+
+车型视觉分析
+→
+PFDBI
+→
+内容主线
+→
+商业植入
+→
+Style Adapter
+
+支持：
+
+开场植入
+中段植入
+结尾植入
+自然叙事植入
+
+不能为了完成商单而破坏内容逻辑。
+
+==================================================
+三十、数据库
+==================================================
+
+至少：
+
+styles
+style_documents
+style_profiles
+style_structure_templates
+style_examples
+
+projects
+scripts
+script_versions
+
+pfdbi_analyses
+vision_observations
+reference_images
+image_annotations
+
+platform_profiles
+duration_profiles
+
+llm_settings
+app_settings
+
+==================================================
+三十一、文件系统
+==================================================
+
+Electron 使用系统文件选择器。
+
+支持文件夹导入。
+
+txt：
+
+UTF-8
+UTF-8 BOM
+GBK / GB18030 尽可能兼容
+
+md：
+
+保留结构语义。
+
+rtf：
+
+进行基础 RTF 清洗后转纯文本。
+
+一个坏文件：
+
+不能导致整个 workflow 失败。
+
+显示：
+
+成功 X
+失败 Y
+
+==================================================
+三十二、图片处理
+==================================================
+
+本地保存：
+
+项目图片目录。
+
+数据库保存：
+
+metadata + path。
+
+不要默认把图片转为永久 base64 写进数据库。
+
+视觉模型调用前：
+
+根据 Provider 要求：
+
+本地文件
+→
+base64 data URL
+
+或：
+
+其他安全可用方式。
+
+禁止上传到第三方公共图床。
+
+==================================================
+三十三、隐私与安全
+==================================================
+
+API Key：
+
+不能暴露给 renderer。
+
+Electron：
+
+contextIsolation = true
+
+nodeIntegration = false
+
+通过：
+
+main
++
+preload
++
+IPC
+
+访问：
+
+数据库
+文件
+LLM
+
+API Key 使用：
+
+安全存储机制。
+
+如果环境允许：
+Electron safeStorage。
+
+如果不适用：
+提供清晰的本地安全配置方案。
+
+日志禁止：
+
+API Key
+
+默认不要输出用户完整文案。
+
+==================================================
+三十四、架构
+==================================================
+
+推荐：
+
+electron/
+  main/
+  preload/
+
+src/
+  renderer/
+
+domain/
+  models/
+  schemas/
+
+application/
+  workflows/
+  services/
+
+infrastructure/
+  db/
+  llm/
+  filesystem/
+  vision/
+
+prompts/
+
+ui/
+  components/
+  pages/
+
+docs/
+
+不要：
+
+React component
+直接调用
+DeepSeek / SiliconFlow API。
+
+必须：
+
+UI
+→ Application Service
+→ Workflow
+→ Provider
+→ SiliconFlow
+
+==================================================
+三十五、Prompt 模块化
+==================================================
+
+所有 Prompt 独立维护。
+
+例如：
+
+prompts/
+
+pfdbi/
+  vision_observation.ts
+  pfdbi_analysis.ts
+  base_draft.ts
+
+style/
+  document_analysis.ts
+  style_aggregation.ts
+  template_generation.ts
+  quality_check.ts
+  style_adapter.ts
+
+commercial/
+  commercial_adapter.ts
+
+platform/
+  platform_adapter.ts
+
+quality/
+  script_quality.ts
+
+禁止把复杂 Prompt 全部写到 UI 组件。
+
+==================================================
+三十六、JSON Schema
+==================================================
+
+必须使用 Zod。
+
+至少：
+
+VisionObservationSchema
+PFDBIAnalysisSchema
+StyleProfileSchema
+StructureTemplateSchema
+ExampleCaseSchema
+QualityReportSchema
+ScriptSchema
+
+结构化 API 输出：
+
+优先：
+
+response_format JSON
+
+如果模型不支持：
+
+JSON parse
++
+schema validation
++
+repair pass
+
+不能让 UI 直接信任模型文本。
+
+==================================================
+三十七、模型路由
+==================================================
+
+建立：
+
+ModelRouter
+
+任务：
+
+vision
+text
+reasoning
+json
+
+例如：
+
+ModelRouter.select("vision")
+
+ModelRouter.select("text")
+
+允许：
+
+用户指定默认模型。
+
+未来允许：
+
+Vision Model：
+某个视觉模型
+
+Reasoning Model：
+某个推理模型
+
+Writing Model：
+某个文本模型
+
+==================================================
+三十八、Token 与成本管理
+==================================================
+
+因为视觉模型 + 文本模型可能多次调用。
+
+每次任务记录：
+
+model
+input token
+output token
+estimated cost
+duration
+
+UI 显示：
+
+本次生成：
+
+视觉分析：
+X tokens
+
+PFDBI：
+X tokens
+
+Base Draft：
+X tokens
+
+Style Adapter：
+X tokens
+
+总计：
+X tokens
+
+如果 SiliconFlow API 返回 usage：
+
+优先使用真实值。
+
+否则：
+
+估算并标记：
+
+“估算”。
+
+==================================================
+三十九、缓存
+==================================================
+
+视觉模型输出可以缓存。
+
+相同：
+
+图片 hash
++
+Vision Model
++
+Prompt Version
+
+可以复用结果。
+
+PFDBI 分析同样可以缓存。
+
+防止：
+
+用户只是重新改写风格
+
+却再次重复视觉分析。
+
+==================================================
+四十、UI
+==================================================
+
+首页：
+
+汽车设计文案助手
+
+[新建文案]
+
+[风格库]
+
+[项目]
+
+最近项目
+
+--------------------------------
+
+左侧：
+
+首页
+文案工作台
+风格库
+项目
+设置
+
+==================================================
+四十一、新建文案页面
+==================================================
+
+步骤式：
+
+Step 1：
+选题
+
+Step 2：
+参考图
+
+Step 3：
+PFDBI
+
+Step 4：
+选择风格
+
+Step 5：
+生成
+
+也可以提供：
+
+“直接开始”
+
+然后后台按照 workflow 自动跑。
+
+==================================================
+四十二、参考图页面
+==================================================
+
+支持：
+
+拖入图片
+
++
+
+选择图片
+
+预览：
+
+Grid
+
+显示：
+
+图片数量
+
+允许：
+
+删除
+排序
+添加标注
+
+按钮：
+
+“开始视觉分析”
+
+==================================================
+四十三、PFDBI 页面
+==================================================
+
+用五张卡：
+
+P
+Proportion
+
+F
+Form
+
+D
+Detail
+
+B
+Brand / Brief
+
+I
+Innovation
+
+每张显示：
+
+观察
+
+证据
+
+判断
+
+置信度
+
+以及：
+
+事实 / 推断 / 偏好
+
+标签。
+
+==================================================
+四十四、风格库
+==================================================
+
+Style Cards：
+
+博主名
+平台
+内容领域
+
+风格标签：
+
+专业
+口语
+幽默
+情绪
+吐槽
+
+[查看 DNA]
+
+进入之后：
+
+Overview
+Language
+Argumentation
+Structure Templates
+Examples
+Commercial
+
+==================================================
+四十五、风格匹配
+==================================================
+
+新建文案时：
+
+用户可以直接选择：
+
+Style DNA
+
+系统自动推荐：
+
+最匹配的 Structure Template。
+
+例如：
+
+选题：
+“某新能源轿车为什么看起来运动？”
+
+系统：
+
+匹配：
+
+Style：
+XXX
+
+Template：
+单车型设计深度分析
+
+并显示：
+
+“推荐原因”
+
+==============================================
+
+四十六、设计评价框架必须可配置
+==================================================
+
+不要把 PFDBI 的规则全部硬编码到 Prompt 中。
+
+建立：
+
+EvaluationFramework
+
+支持未来增加：
+
+PFDBI v1
+PFDBI v2
+
+未来甚至支持：
+
+自定义评价维度。
+
+但 MVP：
+
+默认：
+
+P
+F
+D
+B
+I
+
+==================================================
+四十七、Demo Mode
+==================================================
+
+没有 API Key：
+
+APP 可以运行。
+
+使用：
+
+MockLLMProvider
+
+Demo data：
+
+3 篇虚构示例文案
+
+必须标记：
+
+DEMO DATA
+
+不能假装是真实博主文案。
+
+准备：
+
+1 个 Mock Style DNA
+
+2 个 Structure Templates
+
+1 个 Mock Vision Observation
+
+1 个 Mock PFDBI
+
+1 个 Mock Script
+
+让整个 UI 可以演示完整流程。
+
+==================================================
+四十八、测试
+==================================================
+
+必须：
+
+Unit Test：
+
+txt parser
+md parser
+rtf parser
+image metadata
+duration calculator
+PFDBI schema
+Vision schema
+StyleProfile schema
+StructureTemplate schema
+JSON repair
+prompt builder
+model router
+
+Integration：
+
+StyleExtractionWorkflow
+
+VisionAnalysisWorkflow
+
+DraftGenerationWorkflow
+
+StyleAdaptationWorkflow
+
+QualityCheckWorkflow
+
+使用：
+
+MockLLMProvider
+
+所以没有真实 API Key：
+
+也能跑测试。
+
+==================================================
+四十九、日志
+==================================================
+
+开发模式：
+
+记录：
+
+workflow
+model
+duration
+token usage
+error
+
+不记录：
+
+API Key
+完整用户文案
+完整图片 base64
+
+==================================================
+五十、文档
+==================================================
+
+创建：
+
+docs/architecture.md
+
+docs/product-logic.md
+
+docs/workflows.md
+
+docs/style-dna.md
+
+docs/pfdbi.md
+
+docs/model-routing.md
+
+README.md
+
+README：
+
+项目介绍
+功能
+安装
+启动
+构建
+DeepSeek/SiliconFlow 配置说明
+视觉模型配置
+数据库
+测试
+打包
+常见问题
+
+==================================================
+五十一、代码质量
+==================================================
+
+必须：
+
+TypeScript strict
+
+避免：
+
+any
+
+所有跨层数据：
+
+Schema validate。
+
+所有 IPC：
+
+严格定义参数。
+
+所有 API：
+
+错误处理。
+
+==================================================
+五十二、开发原则
+==================================================
+
+1.
+不要只输出方案。
+
+2.
+不要停留在伪代码。
+
+3.
+直接写代码。
+
+4.
+不要大量 TODO。
+
+5.
+每完成一个阶段：
+
+lint
+typecheck
+test
+
+6.
+最后：
+
+build
+
+7.
+出现依赖冲突：
+
+自行排查。
+
+8.
+出现 Electron native module：
+
+自行处理。
+
+9.
+出现 SiliconFlow API 差异：
+
+以当前官方 API 文档为准。
+
+10.
+模型能力不确定：
+
+不要猜。
+
+11.
+任何可能变化的模型名：
+
+配置化。
+
+12.
+现有 workspace 如已有代码：
+
+优先复用。
+
+==================================================
+五十三、阶段计划
+==================================================
+
+Phase 0：
+
+扫描 workspace。
+
+Phase 1：
+
+Electron + React + TypeScript + Vite
+
+Phase 2：
+
+UI Shell
+
+Phase 3：
+
+SQLite
+
+Phase 4：
+
+SiliconFlow Provider
+
+Phase 5：
+
+Model Router
+
+Phase 6：
+
+txt/md/rtf Import
+
+Phase 7：
+
+Style Extraction
+
+Phase 8：
+
+Style DNA
+
+Phase 9：
+
+Structure Templates
+
+Phase 10：
+
+Vision Upload
+
+Phase 11：
+
+Vision Analysis
+
+Phase 12：
+
+PFDBI
+
+Phase 13：
+
+Base Draft
+
+Phase 14：
+
+Style Adapter
+
+Phase 15：
+
+Platform + Duration
+
+Phase 16：
+
+Quality Check
+
+Phase 17：
+
+Script Editor
+
+Phase 18：
+
+Versioning
+
+Phase 19：
+
+Export
+
+Phase 20：
+
+Tests
+
+Phase 21：
+
+Build
+
+==================================================
+五十四、核心工作流必须最终跑通
+==================================================
+
+场景 A：
+
+新增博主风格
+
+用户：
+
+新增“某博主”
+
+↓
+
+导入文件夹
+
+↓
+
+扫描 10 篇 txt/md/rtf
+
+↓
+
+解析
+
+↓
+
+单篇分析
+
+↓
+
+多篇聚合
+
+↓
+
+生成 Style DNA
+
+↓
+
+生成多个 Structure Templates
+
+↓
+
+生成 Few-shot Examples
+
+↓
+
+质量检查
+
+↓
+
+保存 Style Library
+
+==================================================
+
+场景 B：
+
+汽车设计文案生产
+
+用户：
+
+输入：
+
+“为什么现在很多新能源汽车前脸越来越像？”
+
+初稿：
+
+若干文字
+
+时长：
+
+5分钟
+
+平台：
+
+B站
+
+Style：
+
+选择某博主
+
+图片：
+
+上传 5 张车型参考图
+
+↓
+
+视觉模型：
+
+提取车辆设计观察
+
+↓
+
+PFDBI：
+
+P/F/D/B/I
+
+↓
+
+Base Draft：
+
+约目标字数
+
+↓
+
+自动选择：
+
+Structure Template
+
+↓
+
+Style Adapter
+
+↓
+
+Quality Check
+
+↓
+
+Final Script
+
+==================================================
+五十五、最重要的产品体验
+==================================================
+
+用户应该清楚看到：
+
+【我看到了什么】
+
+Vision
+
+↓
+
+【我怎么分析】
+
+PFDBI
+
+↓
+
+【我怎么组织】
+
+Structure Template
+
+↓
+
+【我怎么表达】
+
+Style DNA
+
+↓
+
+【最终成稿】
+
+Final Script
+
+不要让所有 AI 工作隐藏在：
+
+“正在生成……”
+
+一个 Loading 页面里面。
+
+应该将 AI 工作流：
+
+可解释化。
+
+==================================================
+五十六、汽车设计评价的内容哲学
+==================================================
+
+整个系统必须遵守：
+
+设计事实
+→
+审美感受
+→
+设计判断
+
+不得：
+
+个人偏好
+→
+直接变成客观结论
+
+例如：
+
+错误：
+
+“这车设计很差。”
+
+正确的逻辑：
+
+“问题集中在侧面比例。”
+
+↓
+
+“前轮位置与座舱关系压缩了前舱视觉长度。”
+
+↓
+
+“使整车视觉重心更厚重。”
+
+↓
+
+“因此，它与品牌试图表达的运动定位存在一定冲突。”
+
+这就是本产品需要帮助用户建立的内容逻辑。
+
+==================================================
+五十七、最终验收
+==================================================
+
+执行：
+
+npm install
+
+npm run dev
+
+应该能够：
+
+打开桌面 App
+
+无 API Key：
+
+进入 Demo Mode
+
+有 SiliconFlow API Key：
+
+真实完成：
+
+1.
+导入博主文案文件夹
+
+2.
+生成 Style DNA
+
+3.
+生成多个结构模板
+
+4.
+保存风格
+
+5.
+上传车型参考图
+
+6.
+视觉模型分析
+
+7.
+PFDBI 分析
+
+8.
+生成 Base Draft
+
+9.
+自动匹配 Structure Template
+
+10.
+Style Adapter
+
+11.
+质量检查
+
+12.
+编辑
+
+13.
+保存版本
+
+14.
+导出 TXT / MD
+
+==================================================
+五十八、最终输出
+==================================================
+
+完成开发之后，不要重新输出整个 PRD。
+
+只输出：
+
+1.
+项目完成情况
+
+2.
+技术架构摘要
+
+3.
+已完成模块
+
+4.
+运行方式
+
+5.
+SiliconFlow 配置方法
+
+6.
+视觉模型配置方法
+
+7.
+测试结果
+
+8.
+build 结果
+
+9.
+已知限制
+
+10.
+下一阶段建议
+
+现在开始。
+
+不要等待我确认。
+
+先扫描当前 workspace，然后直接开始执行。

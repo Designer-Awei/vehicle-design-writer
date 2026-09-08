@@ -1,0 +1,27 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "electron.vite.config.*",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/domain/**/*",
+    "src/schemas/**/*",
+    "src/application/**/*",
+    "src/infrastructure/**/*",
+    "src/prompts/**/*",
+    "src/shared/**/*",
+    "tests/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["electron-vite/node"],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@domain/*": ["./src/domain/*"],
+      "@schemas/*": ["./src/schemas/*"],
+      "@application/*": ["./src/application/*"],
+      "@infrastructure/*": ["./src/infrastructure/*"],
+      "@prompts/*": ["./src/prompts/*"]
+    }
+  }
+}
