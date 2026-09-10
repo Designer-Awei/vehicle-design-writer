@@ -9,3 +9,4 @@ out
 .env.*.local
 *.db
 data/
+.e2e-user-data*/

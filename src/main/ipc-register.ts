@@ -3,7 +3,12 @@ import { extname, join } from 'path'
 import { readdirSync, statSync, writeFileSync } from 'fs'
 import { createId, nowIso } from '@domain/ids'
 import { runStyleExtraction } from '@application/workflows/StyleExtractionWorkflow'
-import { runDraftGeneration, runRewrite } from '@application/workflows/DraftGenerationWorkflow'
+import {
+  runDraftGeneration,
+  runPfdbiAnalysis,
+  runRewrite,
+  runVisionAnalysis
+} from '@application/workflows/DraftGenerationWorkflow'
 import { parseDocumentFile, hashFile } from '@infrastructure/filesystem/document-parser'
 import { isSupportedImage, storeImage, toDataUrl } from '@infrastructure/filesystem/image-store'
 import { encryptSecret } from '@infrastructure/security/secret-store'
@@ -17,13 +22,22 @@ import type {
 import {
   IPC,
   type CreateProjectInput,
+  type ImageMetadataPatch,
   type ProjectDetail,
   type ReferenceImageRecord,
-  type StyleDetail
+  type StyleDetail,
+  type StyleMetadataPatch,
+  type StyleRecord
 } from '@shared/ipc'
 import { probeSiliconFlow } from '@application/probe-siliconflow'
 import { createLlm, readApiKey, type AppContext } from './app-context'
-import { DEFAULT_BASE_URL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL } from '@shared/constants'
+import {
+  DEFAULT_BASE_URL,
+  DEFAULT_TEXT_MODEL,
+  DEFAULT_VISION_MODEL,
+  PLATFORMS,
+  STYLE_CATEGORIES
+} from '@shared/constants'
 
 /**
  * 注册全部业务 IPC。API Key 只留在主进程。
@@ -82,36 +96,50 @@ export function registerIpc(ctx: AppContext): void {
       })
     }
   )
+  ipcMain.handle(
+    IPC.stylesCreateFromFolder,
+    async (event, input: { name: string; platform: string; category: string; notes: string }) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const picked = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] })
+      if (picked.canceled || !picked.filePaths[0]) return null
+      const style = ctx.repos.upsertStyle({
+        id: createId('style'),
+        name: input.name,
+        platform: input.platform,
+        category: input.category,
+        notes: input.notes,
+        isDemo: false
+      })
+      try {
+        const files = importDocuments(ctx, style.id, picked.filePaths[0])
+        if (files.length === 0) {
+          ctx.repos.deleteStyle(style.id)
+          throw new Error('所选目录中没有 txt、md 或 rtf 文案')
+        }
+        return { style, files }
+      } catch (error) {
+        ctx.repos.deleteStyle(style.id)
+        throw error
+      }
+    }
+  )
   ipcMain.handle(IPC.stylesImportFolder, async (event, styleId: string) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     const picked = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] })
     if (picked.canceled || !picked.filePaths[0]) return []
-    const files = walkDocs(picked.filePaths[0])
-    const results: Array<{
-      filename: string
-      wordCount: number
-      parseStatus: 'ok' | 'failed'
-      parseError: string | null
-    }> = []
-    for (const filePath of files) {
-      const filename = filePath.split(/[/\\]/).pop() ?? filePath
-      const parsed = parseDocumentFile(filePath, filename)
-      ctx.repos.insertDocument({
-        styleId,
-        filename: parsed.filename,
-        content: parsed.text,
-        wordCount: parsed.wordCount,
-        parseStatus: parsed.status,
-        parseError: parsed.error
-      })
-      results.push({
-        filename: parsed.filename,
-        wordCount: parsed.wordCount,
-        parseStatus: parsed.status,
-        parseError: parsed.error
-      })
+    return importDocuments(ctx, styleId, picked.filePaths[0])
+  })
+  ipcMain.handle(IPC.stylesReplaceFolder, async (event, styleId: string) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const picked = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] })
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const folder = picked.filePaths[0]
+    if (walkDocs(folder).length === 0) {
+      throw new Error('所选目录中没有 txt、md 或 rtf 文案')
     }
-    return results
+    ctx.repos.deleteDocuments(styleId)
+    ctx.repos.clearStyleExtracted(styleId)
+    return importDocuments(ctx, styleId, folder)
   })
   ipcMain.handle(IPC.stylesExtract, async (event, styleId: string) => {
     const { provider, router } = createLlm(ctx.repos)
@@ -122,6 +150,9 @@ export function registerIpc(ctx: AppContext): void {
       onProgress: (progress) => event.sender.send(IPC.workflowProgress, progress)
     })
     return getStyleDetail(ctx, styleId)
+  })
+  ipcMain.handle(IPC.stylesUpdate, (_event, id: string, patch: StyleMetadataPatch) => {
+    return updateStyleMetadata(ctx, id, patch)
   })
   ipcMain.handle(IPC.stylesRemove, (_event, id: string) => {
     ctx.repos.deleteStyle(id)
@@ -180,9 +211,24 @@ export function registerIpc(ctx: AppContext): void {
         contentType: patch.contentType ?? current.contentType,
         styleId: patch.styleId === undefined ? current.styleId : patch.styleId,
         commercial: patch.commercial ?? current.commercial,
+        status: current.status,
         updatedAt: nowIso()
       }
       ctx.repos.upsertProject(next)
+      if (patch.topic !== undefined && patch.topic !== current.topic) {
+        ctx.repos.clearFromPfdbi(id)
+      } else if (
+        (patch.draft !== undefined && patch.draft !== current.draft) ||
+        (patch.platform !== undefined && patch.platform !== current.platform) ||
+        (patch.durationSeconds !== undefined &&
+          patch.durationSeconds !== current.durationSeconds) ||
+        (patch.contentType !== undefined && patch.contentType !== current.contentType) ||
+        (patch.styleId !== undefined && patch.styleId !== current.styleId) ||
+        (patch.commercial !== undefined &&
+          JSON.stringify(patch.commercial) !== JSON.stringify(current.commercial))
+      ) {
+        ctx.repos.clearDrafts(id)
+      }
       if (patch.finalScript != null) {
         const finalDraft = ctx.repos.getScript<ScriptDraft>(id, 'final') ?? {
           title: next.title,
@@ -212,8 +258,43 @@ export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(IPC.projectsRemoveImage, (_event, imageId: string) => {
     ctx.repos.deleteImage(imageId)
   })
+  ipcMain.handle(IPC.projectsUpdateImage, (_event, imageId: string, patch: ImageMetadataPatch) => {
+    ctx.repos.updateImage(imageId, patch)
+    const image = ctx.repos.getImage(imageId)
+    if (!image) throw new Error('参考图不存在')
+    return {
+      ...image,
+      sortOrder:
+        ctx.repos.listImages(image.projectId).find((item) => item.id === imageId)?.sortOrder ?? 0,
+      dataUrl: toDataUrl(image.path),
+      annotations: ctx.repos.listAnnotations(imageId)
+    }
+  })
   ipcMain.handle(IPC.projectsSaveAnnotation, (_event, annotation: ImageAnnotation) => {
     return ctx.repos.saveAnnotation(annotation)
+  })
+  ipcMain.handle(IPC.projectsRemoveAnnotation, (_event, annotationId: string) => {
+    ctx.repos.deleteAnnotation(annotationId)
+  })
+  ipcMain.handle(IPC.projectsAnalyzeVision, async (event, projectId: string) => {
+    const { provider, router } = createLlm(ctx.repos)
+    await runVisionAnalysis(projectId, {
+      repos: ctx.repos,
+      provider,
+      router,
+      onProgress: (progress) => event.sender.send(IPC.workflowProgress, progress)
+    })
+    return getProjectDetail(ctx, projectId)
+  })
+  ipcMain.handle(IPC.projectsAnalyzePfdbi, async (event, projectId: string) => {
+    const { provider, router } = createLlm(ctx.repos)
+    await runPfdbiAnalysis(projectId, {
+      repos: ctx.repos,
+      provider,
+      router,
+      onProgress: (progress) => event.sender.send(IPC.workflowProgress, progress)
+    })
+    return getProjectDetail(ctx, projectId)
   })
   ipcMain.handle(IPC.projectsGenerate, async (event, projectId: string) => {
     const { provider, router } = createLlm(ctx.repos)
@@ -298,6 +379,31 @@ function getSettings(ctx: AppContext): LlmSettings {
   }
 }
 
+/**
+ * 更新已有风格的档案字段，不触碰 Style DNA。
+ */
+function updateStyleMetadata(ctx: AppContext, id: string, patch: StyleMetadataPatch): StyleRecord {
+  const current = ctx.repos.getStyle(id)
+  if (!current) throw new Error('风格不存在')
+  const name = (patch.name ?? current.name).trim()
+  if (!name) throw new Error('请填写风格名称')
+  const platform = patch.platform ?? current.platform
+  const category = patch.category ?? current.category
+  if (patch.platform !== undefined && !(PLATFORMS as readonly string[]).includes(platform)) {
+    throw new Error('不支持的发布平台')
+  }
+  if (patch.category !== undefined && !(STYLE_CATEGORIES as readonly string[]).includes(category)) {
+    throw new Error('不支持的内容类型')
+  }
+  return ctx.repos.upsertStyle({
+    ...current,
+    name,
+    platform,
+    category,
+    notes: patch.notes ?? current.notes
+  })
+}
+
 function getStyleDetail(ctx: AppContext, id: string): StyleDetail | null {
   const style = ctx.repos.getStyle(id)
   if (!style) return null
@@ -319,6 +425,9 @@ function getProjectDetail(ctx: AppContext, id: string): ProjectDetail | null {
     filename: image.filename,
     hash: image.hash,
     sortOrder: image.sortOrder,
+    role: image.role,
+    vehicleLabel: image.vehicleLabel,
+    comparisonNote: image.comparisonNote,
     dataUrl: toDataUrl(image.path),
     annotations: ctx.repos.listAnnotations(image.id)
   }))
@@ -372,4 +481,44 @@ function walkDocs(dir: string): string[] {
     }
   }
   return result
+}
+
+/**
+ * 解析目录中的支持文档并绑定到已创建的风格档案。
+ */
+function importDocuments(
+  ctx: AppContext,
+  styleId: string,
+  folder: string
+): Array<{
+  filename: string
+  wordCount: number
+  parseStatus: 'ok' | 'failed'
+  parseError: string | null
+}> {
+  const results: Array<{
+    filename: string
+    wordCount: number
+    parseStatus: 'ok' | 'failed'
+    parseError: string | null
+  }> = []
+  for (const filePath of walkDocs(folder)) {
+    const filename = filePath.split(/[/\\]/).pop() ?? filePath
+    const parsed = parseDocumentFile(filePath, filename)
+    ctx.repos.insertDocument({
+      styleId,
+      filename: parsed.filename,
+      content: parsed.text,
+      wordCount: parsed.wordCount,
+      parseStatus: parsed.status,
+      parseError: parsed.error
+    })
+    results.push({
+      filename: parsed.filename,
+      wordCount: parsed.wordCount,
+      parseStatus: parsed.status,
+      parseError: parsed.error
+    })
+  }
+  return results
 }

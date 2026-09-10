@@ -9,7 +9,12 @@ interface SiliconFlowOptions {
 }
 
 interface SiliconFlowChoice {
-  message?: { content?: string | Array<{ type?: string; text?: string }> }
+  message?: {
+    content?: string | Array<{ type?: string; text?: string }>
+    reasoning_content?: string
+    reasoning?: string
+  }
+  finish_reason?: string
 }
 
 interface SiliconFlowPayload {
@@ -49,8 +54,8 @@ export class SiliconFlowProvider implements LLMProvider {
     }
     if (request.json) {
       body.response_format = { type: 'json_object' }
-    }
-    if (request.maxTokens) {
+      body.max_tokens = request.maxTokens ?? 8192
+    } else if (request.maxTokens) {
       body.max_tokens = request.maxTokens
     }
 
@@ -58,12 +63,19 @@ export class SiliconFlowProvider implements LLMProvider {
     try {
       payload = await this.request(body)
     } catch (error) {
+      if (isTimeoutError(error)) {
+        throw wrapLlmError(error)
+      }
       if (request.json && error instanceof Error && /response_format|json/i.test(error.message)) {
         logInfo('llm.json_fallback', { model, task: request.task })
         delete body.response_format
-        payload = await this.request(body)
+        try {
+          payload = await this.request(body)
+        } catch (fallbackError) {
+          throw wrapLlmError(fallbackError)
+        }
       } else {
-        throw error
+        throw wrapLlmError(error)
       }
     }
 
@@ -92,7 +104,7 @@ export class SiliconFlowProvider implements LLMProvider {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120000)
+      signal: AbortSignal.timeout(90_000)
     })
     if (!response.ok) {
       const detail = await response.text()
@@ -103,12 +115,53 @@ export class SiliconFlowProvider implements LLMProvider {
   }
 }
 
+/**
+ * SiliconFlow / undici 超时会抛 TimeoutError，这里收成可直接展示的中文。
+ */
+function wrapLlmError(error: unknown): Error {
+  if (isTimeoutError(error)) {
+    logError('llm.timeout', error)
+    return new Error('模型响应超时。已改为分片并行提取，请再试一次；若连续失败可更换更快的文本模型。')
+  }
+  if (error instanceof Error) return error
+  return new Error(String(error))
+}
+
+/**
+ * 判断是否为 AbortSignal.timeout 触发的超时。
+ */
+function isTimeoutError(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === 'TimeoutError') ||
+    (typeof error === 'object' &&
+      error != null &&
+      'name' in error &&
+      (error as { name: string }).name === 'TimeoutError') ||
+    (error instanceof Error && /aborted due to timeout/i.test(error.message))
+  )
+}
+
 function toApiMessage(message: ChatMessage): { role: string; content: unknown } {
   return { role: message.role, content: message.content }
 }
 
 function extractText(payload: SiliconFlowPayload): string {
-  const content = payload.choices?.[0]?.message?.content
+  const message = payload.choices?.[0]?.message
+  const content = stringifyContent(message?.content)
+  const reasoning =
+    (typeof message?.reasoning_content === 'string' ? message.reasoning_content : '') ||
+    (typeof message?.reasoning === 'string' ? message.reasoning : '')
+  if (content.includes('{') || content.includes('[')) return content
+  if (reasoning.includes('{') || reasoning.includes('[')) return reasoning
+  return content || reasoning
+}
+
+/**
+ * 把 SiliconFlow 可能返回的字符串或分段 content 拼成纯文本。
+ */
+function stringifyContent(
+  content: string | Array<{ type?: string; text?: string }> | undefined
+): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
     return content.map((part) => part.text ?? '').join('\n')

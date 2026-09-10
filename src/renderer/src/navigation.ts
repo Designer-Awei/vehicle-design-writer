@@ -21,7 +21,9 @@ export const STYLE_STAGES = [
 ] as const
 
 export const WORKFLOW_STAGES = [
-  { id: 'vision', label: '参考图与观察' },
-  { id: 'pfdbi', label: 'PFDBI 分析' },
+  { id: 'images', label: '参考图与标注' },
+  { id: 'vision', label: '视觉观察' },
+  { id: 'pfdbi', label: 'PFDBI 评价' },
+  { id: 'brief', label: '成稿设置' },
   { id: 'script', label: '文案编辑' }
 ] as const

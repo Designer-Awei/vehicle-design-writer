@@ -2,6 +2,7 @@ import type {
   CommercialBrief,
   DurationProfile,
   ImageAnnotation,
+  ImageRole,
   LlmSettings,
   PFDBIAnalysis,
   PlatformProfile,
@@ -31,6 +32,14 @@ export interface TokenUsageItem {
   totalTokens: number
   durationMs: number
   estimated: boolean
+}
+
+/** 已创建风格的可改档案字段。 */
+export interface StyleMetadataPatch {
+  name?: string
+  platform?: string
+  category?: string
+  notes?: string
 }
 
 export interface StyleRecord {
@@ -82,8 +91,17 @@ export interface ReferenceImageRecord {
   filename: string
   hash: string
   sortOrder: number
+  role: ImageRole
+  vehicleLabel: string
+  comparisonNote: string
   dataUrl: string
   annotations: ImageAnnotation[]
+}
+
+export interface ImageMetadataPatch {
+  role?: ImageRole
+  vehicleLabel?: string
+  comparisonNote?: string
 }
 
 export interface ScriptVersionRecord {
@@ -152,8 +170,16 @@ export interface AppApi {
       category: string
       notes: string
     }) => Promise<StyleRecord>
+    createFromFolder: (input: {
+      name: string
+      platform: string
+      category: string
+      notes: string
+    }) => Promise<{ style: StyleRecord; files: ScanFileResult[] } | null>
     importFolder: (styleId: string) => Promise<ScanFileResult[]>
+    replaceFolder: (styleId: string) => Promise<ScanFileResult[] | null>
     extract: (styleId: string) => Promise<StyleDetail>
+    update: (id: string, patch: StyleMetadataPatch) => Promise<StyleRecord>
     remove: (id: string) => Promise<void>
   }
   projects: {
@@ -166,7 +192,11 @@ export interface AppApi {
     ) => Promise<ProjectDetail>
     addImages: (projectId: string) => Promise<ReferenceImageRecord[]>
     removeImage: (imageId: string) => Promise<void>
+    updateImage: (imageId: string, patch: ImageMetadataPatch) => Promise<ReferenceImageRecord>
     saveAnnotation: (annotation: ImageAnnotation) => Promise<ImageAnnotation>
+    removeAnnotation: (annotationId: string) => Promise<void>
+    analyzeVision: (projectId: string) => Promise<ProjectDetail>
+    analyzePfdbi: (projectId: string) => Promise<ProjectDetail>
     generate: (projectId: string) => Promise<ProjectDetail>
     rewrite: (projectId: string, selectedText: string, instruction: string) => Promise<string>
     restoreVersion: (versionId: string) => Promise<ProjectDetail>
@@ -192,8 +222,11 @@ export const IPC = {
   stylesList: 'styles:list',
   stylesGet: 'styles:get',
   stylesCreate: 'styles:create',
+  stylesCreateFromFolder: 'styles:createFromFolder',
   stylesImportFolder: 'styles:importFolder',
+  stylesReplaceFolder: 'styles:replaceFolder',
   stylesExtract: 'styles:extract',
+  stylesUpdate: 'styles:update',
   stylesRemove: 'styles:remove',
   projectsList: 'projects:list',
   projectsGet: 'projects:get',
@@ -201,7 +234,11 @@ export const IPC = {
   projectsUpdate: 'projects:update',
   projectsAddImages: 'projects:addImages',
   projectsRemoveImage: 'projects:removeImage',
+  projectsUpdateImage: 'projects:updateImage',
   projectsSaveAnnotation: 'projects:saveAnnotation',
+  projectsRemoveAnnotation: 'projects:removeAnnotation',
+  projectsAnalyzeVision: 'projects:analyzeVision',
+  projectsAnalyzePfdbi: 'projects:analyzePfdbi',
   projectsGenerate: 'projects:generate',
   projectsRewrite: 'projects:rewrite',
   projectsRestoreVersion: 'projects:restoreVersion',

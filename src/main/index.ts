@@ -9,6 +9,17 @@ import { registerIpc } from './ipc-register'
  * 创建主窗口。
  */
 function createWindow(): void {
+  const windowsFrame =
+    process.platform === 'win32'
+      ? {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: {
+            color: '#120f0c',
+            symbolColor: '#f3ece1',
+            height: 32
+          }
+        }
+      : {}
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -17,6 +28,8 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: '汽车设计文案助手',
+    backgroundColor: '#0c0b0a',
+    ...windowsFrame,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

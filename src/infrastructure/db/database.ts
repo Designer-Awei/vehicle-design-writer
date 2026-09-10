@@ -1,3 +1,4 @@
+import '../logging/quiet-node-warnings'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'fs'
 import { dirname } from 'path'

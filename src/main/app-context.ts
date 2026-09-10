@@ -21,7 +21,7 @@ export interface AppContext {
  * 加载根目录 .env，初始化 SQLite，并在无密钥时启用 Demo Mode。
  */
 export function createAppContext(): AppContext {
-  config({ path: join(process.cwd(), '.env') })
+  config({ path: join(process.cwd(), '.env'), quiet: true })
   const userData = app.getPath('userData')
   const db = new AppDatabase(join(userData, 'vehicle-design-writer.sqlite'))
   const repos = new Repositories(db)

@@ -100,6 +100,9 @@ const STATEMENTS = [
     filename TEXT NOT NULL,
     hash TEXT NOT NULL,
     sort_order INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'primary',
+    vehicle_label TEXT NOT NULL DEFAULT '',
+    comparison_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   )`,
@@ -141,5 +144,25 @@ const STATEMENTS = [
 export function runMigrations(db: AppDatabase): void {
   for (const sql of STATEMENTS) {
     db.exec(sql)
+  }
+  ensureColumn(db, 'reference_images', 'role', "TEXT NOT NULL DEFAULT 'primary'")
+  ensureColumn(db, 'reference_images', 'vehicle_label', "TEXT NOT NULL DEFAULT ''")
+  ensureColumn(db, 'reference_images', 'comparison_note', "TEXT NOT NULL DEFAULT ''")
+  db.exec("UPDATE reference_images SET role = 'other' WHERE role IN ('vertical', 'horizontal')")
+  db.exec(`UPDATE styles SET category = '设计观点' WHERE category NOT IN (
+    '车型解读','设计知识','设计观点','设计回顾','新车热点','设计跨界'
+  )`)
+  db.exec(`UPDATE projects SET content_type = '车型解读' WHERE content_type NOT IN (
+    '车型解读','设计知识','设计观点','设计回顾','新车热点','设计跨界'
+  )`)
+}
+
+/**
+ * 为已有本地数据库补充列，避免重复执行 ALTER TABLE。
+ */
+function ensureColumn(db: AppDatabase, table: string, column: string, definition: string): void {
+  const columns = db.all<{ name: string }>(`PRAGMA table_info(${table})`)
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 }

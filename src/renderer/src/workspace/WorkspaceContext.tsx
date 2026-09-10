@@ -1,6 +1,8 @@
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -53,11 +55,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
 export function useWorkspaceBar(config: WorkspaceBarConfig): void {
   const { setConfig } = useContext(WorkspaceContext)
   const onStageSelectRef = useRef(config.onStageSelect)
-  onStageSelectRef.current = config.onStageSelect
   const stagesKey =
     config.stages
       ?.map((item) => `${item.id}:${item.label}:${item.to ?? ''}:${item.disabled ? '1' : '0'}`)
       .join('|') ?? ''
+
+  useEffect(() => {
+    onStageSelectRef.current = config.onStageSelect
+  }, [config.onStageSelect])
 
   useLayoutEffect(() => {
     setConfig({
@@ -67,7 +72,14 @@ export function useWorkspaceBar(config: WorkspaceBarConfig): void {
       activeStage: config.activeStage,
       onStageSelect: (id) => onStageSelectRef.current?.(id)
     })
-  }, [config.parent?.to, config.parent?.label, config.title, config.activeStage, stagesKey, setConfig])
+  }, [
+    config.parent?.to,
+    config.parent?.label,
+    config.title,
+    config.activeStage,
+    stagesKey,
+    setConfig
+  ])
 
   useLayoutEffect(() => {
     return () => setConfig(defaultConfig)

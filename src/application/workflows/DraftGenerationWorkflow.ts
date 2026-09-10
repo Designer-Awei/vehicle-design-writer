@@ -18,8 +18,7 @@ import {
   type PlatformProfile,
   type QualityReport,
   type ScriptDraft,
-  type TemplateMatch,
-  type VisionObservation
+  type TemplateMatch
 } from '@schemas/index'
 import { PROMPT_VERSION } from '@shared/constants'
 import type { WorkflowProgress } from '@shared/ipc'
@@ -29,6 +28,7 @@ import {
   scriptQualityPrompt,
   styleAdapterPrompt,
   templateMatchPrompt,
+  visionObservationRepairInstruction,
   visionObservationPrompt,
   rewritePrompt
 } from '@prompts/index'
@@ -41,37 +41,43 @@ export interface DraftContext {
 }
 
 /**
- * 视觉观察 → PFDBI → Base Draft → 模板匹配 → Style Adapter → 质检。禁止一步生成终稿。
+ * 对当前项目的全部参考图执行视觉观察。
  */
-export async function runDraftGeneration(projectId: string, ctx: DraftContext): Promise<void> {
+export async function runVisionAnalysis(projectId: string, ctx: DraftContext): Promise<void> {
   const project = ctx.repos.getProject(projectId)
   if (!project) throw new Error('项目不存在')
+  const images = ctx.repos.listImages(projectId)
+  if (images.length === 0) {
+    throw new Error('请先上传至少一张参考图')
+  }
   const report = (stage: string, message: string, percent: number): void => {
     ctx.onProgress?.({ projectId, stage, message, percent })
   }
-
-  const images = ctx.repos.listImages(projectId)
   const visionModel = ctx.router.select('vision')
   const textModel = ctx.router.select('json')
-
-  const observations: VisionObservation[] = []
   for (const [index, image] of images.entries()) {
     report(
       'vision',
       `视觉观察 ${index + 1}/${Math.max(images.length, 1)}`,
-      8 + Math.round((index / Math.max(images.length, 1)) * 22)
+      5 + Math.round((index / Math.max(images.length, 1)) * 90)
     )
     const annotations = ctx.repos.listAnnotations(image.id)
-    const cacheKey = `${image.hash}:${visionModel}:${PROMPT_VERSION}:${hashText(JSON.stringify(annotations))}`
-    const cached = ctx.repos.getVisionByCache(cacheKey)
-    if (cached) {
-      observations.push(cached)
-      continue
+    const metadata = {
+      role: image.role,
+      vehicleLabel: image.vehicleLabel,
+      comparisonNote: image.comparisonNote
     }
-    if (images.length === 0) break
+    const cacheKey = `${image.id}:${image.hash}:${visionModel}:${PROMPT_VERSION}:${hashText(
+      JSON.stringify({ annotations, metadata })
+    )}`
+    const cached = ctx.repos.getVisionByCache(cacheKey)
+    if (cached) continue
     const prompt = visionObservationPrompt({
       imageId: image.id,
-      annotations: formatAnnotations(annotations)
+      annotations: formatAnnotations(annotations),
+      role: image.role,
+      vehicleLabel: image.vehicleLabel,
+      comparisonNote: image.comparisonNote
     })
     const dataUrl = toDataUrl(image.path)
     const response = await ctx.provider.chat(
@@ -97,23 +103,49 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
       response.text,
       VisionObservationSchema,
       ctx.provider,
-      textModel
+      textModel,
+      visionObservationRepairInstruction(image.id)
     )
     observation.imageId = image.id
     ctx.repos.saveVision(projectId, image.id, observation, cacheKey)
-    observations.push(observation)
   }
+  ctx.repos.clearFromPfdbi(projectId)
+  report('vision', '全部参考图视觉观察完成', 100)
+}
 
-  report('pfdbi', 'PFDBI 设计评价分析', 38)
+/**
+ * 在全部图片完成视觉观察后生成主体评价，以及与其他车型的比较。
+ */
+export async function runPfdbiAnalysis(projectId: string, ctx: DraftContext): Promise<void> {
+  const project = ctx.repos.getProject(projectId)
+  if (!project) throw new Error('项目不存在')
+  const images = ctx.repos.listImages(projectId)
+  if (images.length === 0) {
+    throw new Error('请先上传至少一张参考图')
+  }
+  const observations = ctx.repos.listVision(projectId)
+  const observedIds = new Set(observations.map((item) => item.imageId))
+  if (images.some((image) => !observedIds.has(image.id))) {
+    throw new Error('请先完成全部参考图的视觉观察')
+  }
+  const textModel = ctx.router.select('json')
+  const evidence = images.map((image) => ({
+    imageId: image.id,
+    role: image.role,
+    vehicleLabel: image.vehicleLabel || '未填写车型标签',
+    comparisonNote: image.comparisonNote,
+    observation: observations.find((item) => item.imageId === image.id)
+  }))
+  ctx.onProgress?.({ projectId, stage: 'pfdbi', message: 'PFDBI 设计评价分析', percent: 20 })
   const pfdbiKey = hashText(
-    `${project.topic}|${project.draft}|${JSON.stringify(observations)}|${textModel}|${PROMPT_VERSION}`
+    `${project.topic}|${JSON.stringify(evidence)}|${textModel}|${PROMPT_VERSION}`
   )
   let pfdbi = ctx.repos.getPfdbiByCache(pfdbiKey)
   if (!pfdbi) {
     const prompt = pfdbiAnalysisPrompt({
       topic: project.topic,
-      draft: project.draft,
-      vision: JSON.stringify(observations),
+      draft: '',
+      vision: JSON.stringify(evidence),
       extras: JSON.stringify(project.commercial)
     })
     const response = await ctx.provider.chat(
@@ -132,11 +164,27 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
     pfdbi = await parseModelJson(response.text, PFDBIAnalysisSchema, ctx.provider, textModel)
     ctx.repos.savePfdbi(projectId, pfdbi, pfdbiKey)
   }
+  ctx.repos.clearDrafts(projectId)
+  ctx.onProgress?.({ projectId, stage: 'pfdbi', message: 'PFDBI 评价完成', percent: 100 })
+}
 
+/**
+ * PFDBI → Base Draft → 模板匹配 → Style Adapter → 质检。禁止一步生成终稿。
+ */
+export async function runDraftGeneration(projectId: string, ctx: DraftContext): Promise<void> {
+  const project = ctx.repos.getProject(projectId)
+  if (!project) throw new Error('项目不存在')
+  const pfdbi = ctx.repos.getPfdbi(projectId)
+  if (!pfdbi) throw new Error('请先完成 PFDBI 评价')
+  const textModel = ctx.router.select('json')
+  const report = (stage: string, message: string, percent: number): void => {
+    ctx.onProgress?.({ projectId, stage, message, percent })
+  }
   const duration = ctx.repos.listDurations()[0] ?? DEFAULT_DURATION
-  report('base_draft', '生成 Base Draft（不模仿博主）', 55)
+  report('base_draft', '生成 Base Draft（不模仿博主）', 12)
   const basePrompt = baseDraftPrompt({
     topic: project.topic,
+    draft: project.draft,
     durationSeconds: project.durationSeconds,
     platform: project.platform,
     pfdbi: JSON.stringify(pfdbi),
@@ -166,7 +214,7 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
   const platforms = ctx.repos.listPlatforms()
   const platform = platforms.find((item) => item.platform === project.platform)
 
-  report('template', '匹配结构模板', 68)
+  report('template', '匹配结构模板', 42)
   let match: TemplateMatch = {
     templateName: templates[0]?.templateName ?? '默认线性结构',
     reason: '未找到风格模板，使用默认顺序。'
@@ -207,7 +255,7 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
   const selectedTemplate =
     templates.find((item) => item.templateName === match.templateName) ?? templates[0]
 
-  report('adapter', 'Style Adapter 风格适配', 80)
+  report('adapter', 'Style Adapter 风格适配', 65)
   const adapterPrompt = styleAdapterPrompt({
     base: JSON.stringify(baseDraft),
     profile: JSON.stringify(profile ?? { note: '未选择 Style DNA，保持 Base Draft 逻辑。' }),
@@ -238,7 +286,7 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
   ctx.repos.saveScript(projectId, 'final', finalDraft)
   ctx.repos.addVersion(projectId, 'V Style Adapted', finalDraft.script)
 
-  report('quality', '质量检查', 92)
+  report('quality', '质量检查', 88)
   const estimate = estimateDuration(finalDraft.script, project.durationSeconds, duration)
   const qualityPrompt = scriptQualityPrompt({
     script: finalDraft.script,

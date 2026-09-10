@@ -1,16 +1,18 @@
 import { createId, nowIso } from '@domain/ids'
-import type {
-  CommercialBrief,
-  DurationProfile,
-  ExampleCase,
-  ImageAnnotation,
-  PFDBIAnalysis,
-  PlatformProfile,
-  QualityReport,
-  ScriptDraft,
-  StyleProfile,
-  StructureTemplate,
-  VisionObservation
+import {
+  coerceImageRole,
+  type CommercialBrief,
+  type DurationProfile,
+  type ExampleCase,
+  type ImageAnnotation,
+  type ImageRole,
+  type PFDBIAnalysis,
+  type PlatformProfile,
+  type QualityReport,
+  type ScriptDraft,
+  type StyleProfile,
+  type StructureTemplate,
+  type VisionObservation
 } from '@schemas/index'
 import type {
   ProjectRecord,
@@ -156,6 +158,10 @@ export class Repositories {
   }
 
   deleteStyle(id: string): void {
+    this.db.run('UPDATE projects SET style_id = NULL, updated_at = ? WHERE style_id = ?', [
+      nowIso(),
+      id
+    ])
     this.db.run('DELETE FROM styles WHERE id = ?', [id])
   }
 
@@ -189,6 +195,22 @@ export class Repositories {
       'SELECT id, filename, content FROM style_documents WHERE style_id = ? AND parse_status = ?',
       [styleId, 'ok']
     )
+  }
+
+  /**
+   * 删除某风格下的全部样本文档。
+   */
+  deleteDocuments(styleId: string): void {
+    this.db.run('DELETE FROM style_documents WHERE style_id = ?', [styleId])
+  }
+
+  /**
+   * 清除已提取的 Style DNA，不影响档案信息和样本文档。
+   */
+  clearStyleExtracted(styleId: string): void {
+    this.db.run('DELETE FROM style_profiles WHERE style_id = ?', [styleId])
+    this.db.run('DELETE FROM style_structure_templates WHERE style_id = ?', [styleId])
+    this.db.run('DELETE FROM style_examples WHERE style_id = ?', [styleId])
   }
 
   insertDocument(doc: {
@@ -345,13 +367,30 @@ export class Repositories {
     filename: string
     hash: string
     sortOrder: number
+    role?: ImageRole
+    vehicleLabel?: string
+    comparisonNote?: string
   }): { id: string; createdAt: string } {
     const id = image.id ?? createId('img')
     const createdAt = nowIso()
     this.db.run(
-      'INSERT INTO reference_images(id, project_id, path, filename, hash, sort_order, created_at) VALUES(?,?,?,?,?,?,?)',
-      [id, image.projectId, image.path, image.filename, image.hash, image.sortOrder, createdAt]
+      `INSERT INTO reference_images(
+        id, project_id, path, filename, hash, sort_order, role, vehicle_label, comparison_note, created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      [
+        id,
+        image.projectId,
+        image.path,
+        image.filename,
+        image.hash,
+        image.sortOrder,
+        image.role ?? 'primary',
+        image.vehicleLabel ?? '',
+        image.comparisonNote ?? '',
+        createdAt
+      ]
     )
+    this.clearFromPfdbi(image.projectId)
     return { id, createdAt }
   }
 
@@ -362,6 +401,9 @@ export class Repositories {
     filename: string
     hash: string
     sortOrder: number
+    role: ImageRole
+    vehicleLabel: string
+    comparisonNote: string
   }> {
     return this.db
       .all<{
@@ -371,6 +413,9 @@ export class Repositories {
         filename: string
         hash: string
         sort_order: number
+        role: ImageRole
+        vehicle_label: string
+        comparison_note: string
       }>('SELECT * FROM reference_images WHERE project_id = ? ORDER BY sort_order ASC', [projectId])
       .map((row) => ({
         id: row.id,
@@ -378,19 +423,34 @@ export class Repositories {
         path: row.path,
         filename: row.filename,
         hash: row.hash,
-        sortOrder: row.sort_order
+        sortOrder: row.sort_order,
+        role: coerceImageRole(row.role),
+        vehicleLabel: row.vehicle_label,
+        comparisonNote: row.comparison_note
       }))
   }
 
-  getImage(
-    id: string
-  ): { id: string; projectId: string; path: string; filename: string; hash: string } | undefined {
+  getImage(id: string):
+    | {
+        id: string
+        projectId: string
+        path: string
+        filename: string
+        hash: string
+        role: ImageRole
+        vehicleLabel: string
+        comparisonNote: string
+      }
+    | undefined {
     const row = this.db.get<{
       id: string
       project_id: string
       path: string
       filename: string
       hash: string
+      role: ImageRole
+      vehicle_label: string
+      comparison_note: string
     }>('SELECT * FROM reference_images WHERE id = ?', [id])
     if (!row) return undefined
     return {
@@ -398,13 +458,37 @@ export class Repositories {
       projectId: row.project_id,
       path: row.path,
       filename: row.filename,
-      hash: row.hash
+      hash: row.hash,
+      role: coerceImageRole(row.role),
+      vehicleLabel: row.vehicle_label,
+      comparisonNote: row.comparison_note
     }
   }
 
   deleteImage(id: string): void {
+    const image = this.getImage(id)
     this.db.run('DELETE FROM image_annotations WHERE image_id = ?', [id])
+    this.db.run('DELETE FROM vision_observations WHERE image_id = ?', [id])
     this.db.run('DELETE FROM reference_images WHERE id = ?', [id])
+    if (image) this.clearFromPfdbi(image.projectId)
+  }
+
+  updateImage(
+    id: string,
+    patch: { role?: ImageRole; vehicleLabel?: string; comparisonNote?: string }
+  ): void {
+    const image = this.getImage(id)
+    if (!image) throw new Error('参考图不存在')
+    this.db.run(
+      'UPDATE reference_images SET role=?, vehicle_label=?, comparison_note=? WHERE id=?',
+      [
+        patch.role ?? image.role,
+        patch.vehicleLabel ?? image.vehicleLabel,
+        patch.comparisonNote ?? image.comparisonNote,
+        id
+      ]
+    )
+    this.invalidateImageAnalysis(id)
   }
 
   listAnnotations(imageId: string): ImageAnnotation[] {
@@ -444,7 +528,33 @@ export class Repositories {
         annotation.note
       ]
     )
+    this.invalidateImageAnalysis(annotation.imageId)
     return { ...annotation, id }
+  }
+
+  deleteAnnotation(id: string): void {
+    const row = this.db.get<{ image_id: string }>(
+      'SELECT image_id FROM image_annotations WHERE id = ?',
+      [id]
+    )
+    this.db.run('DELETE FROM image_annotations WHERE id = ?', [id])
+    if (row) this.invalidateImageAnalysis(row.image_id)
+  }
+
+  invalidateImageAnalysis(imageId: string): void {
+    const image = this.getImage(imageId)
+    this.db.run('DELETE FROM vision_observations WHERE image_id = ?', [imageId])
+    if (image) this.clearFromPfdbi(image.projectId)
+  }
+
+  clearFromPfdbi(projectId: string): void {
+    this.db.run('DELETE FROM pfdbi_analyses WHERE project_id = ?', [projectId])
+    this.clearDrafts(projectId)
+  }
+
+  clearDrafts(projectId: string): void {
+    this.db.run('DELETE FROM scripts WHERE project_id = ?', [projectId])
+    this.db.run('DELETE FROM script_versions WHERE project_id = ?', [projectId])
   }
 
   saveVision(

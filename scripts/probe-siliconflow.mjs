@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import { config } from 'dotenv'
 import { readFileSync } from 'fs'
 import { join, dirname } from 'path'

@@ -104,6 +104,9 @@ export const mockPfdbi = (): PFDBIAnalysis => ({
   },
   aestheticKeywords: ['同质化', '封闭前脸', '灯具图形', '姿态配方'],
   comparisons: ['燃油车时代进气口曾是品牌锚点'],
+  peerComparisons: [],
+  verticalComparisons: [],
+  horizontalComparisons: [],
   counterArguments: ['法规与散热需求也会推动前脸封闭，不能全归咎审美惰性'],
   facts: ['参考图可见封闭前脸与细长灯组', '车型身份待确认'],
   inferences: ['灯组被用来补品牌识别'],
@@ -195,9 +198,9 @@ export const mockStyleProfile = (): StyleProfile => ({
 
 export const mockTemplates = (): StructureTemplate[] => [
   {
-    templateName: '单车型设计深度分析',
+    templateName: '车型解读',
     scenario: '围绕一辆车把 PFDBI 走完',
-    applicableTopics: ['单车型设计深度分析', '热点设计评论'],
+    applicableTopics: ['车型解读', '设计回顾'],
     durationRange: '4-8 分钟',
     sections: [
       {
@@ -230,9 +233,9 @@ export const mockTemplates = (): StructureTemplate[] => [
     ]
   },
   {
-    templateName: '热点设计评论',
+    templateName: '设计观点',
     scenario: '短评论一个设计现象',
-    applicableTopics: ['热点设计评论'],
+    applicableTopics: ['设计观点', '新车热点', '设计跨界', '设计知识'],
     durationRange: '2-5 分钟',
     sections: [
       { name: 'Hook', timePercent: 0.15, purpose: '抓现象', instruction: '直接说像在哪里' },
@@ -251,14 +254,14 @@ export const mockTemplates = (): StructureTemplate[] => [
 export const mockExamples = (): ExampleCase[] => [
   {
     sourceDocumentId: 'doc_demo_1',
-    scenario: '热点设计评论',
+    scenario: '新车热点',
     structure: '现象-证据-反转',
     excerpt: '你有没有发现，很多车远看都像一家人。不是灯坏了，是配方重复了。',
     whyRepresentative: '短句开场，立刻把现象变成判断。'
   },
   {
     sourceDocumentId: 'doc_demo_2',
-    scenario: '单车型设计深度分析',
+    scenario: '车型解读',
     structure: '比例-型面-品牌任务',
     excerpt: '先看前轮位置。座舱一往后，车头就会被“拉长”，这是姿态，不是装饰。',
     whyRepresentative: '把术语翻译成观众能看见的空间关系。'
@@ -293,7 +296,7 @@ export const mockStyleQuality = (): StyleQuality => ({
 })
 
 export const mockTemplateMatch = (): TemplateMatch => ({
-  templateName: '单车型设计深度分析',
+  templateName: '车型解读',
   reason: '选题是对一类车型前脸现象的设计评价，适合把 PFDBI 完整走一遍。'
 })
 

@@ -32,7 +32,7 @@ export function seedIfEmpty(repos: Repositories): void {
     id: styleId,
     name: '演示创作者 A（DEMO DATA）',
     platform: 'B站',
-    category: '汽车设计评论',
+    category: '设计观点',
     notes: '虚构演示风格，不是真实博主文案。',
     isDemo: true,
     createdAt: now
@@ -76,7 +76,7 @@ export function seedIfEmpty(repos: Repositories): void {
     draft: '感觉最近新车前脸都在用细灯带和封闭中网，想做成一期 5 分钟 B 站口播。',
     platform: 'B站',
     durationSeconds: 300,
-    contentType: '热点设计评论',
+    contentType: '新车热点',
     styleId,
     commercial: {
       enabled: false,
@@ -100,7 +100,7 @@ export function seedIfEmpty(repos: Repositories): void {
   repos.saveScript(projectId, 'final', mockFinalScript())
   repos.saveScript(projectId, 'quality', mockQuality())
   repos.saveScript(projectId, 'match', {
-    templateName: '单车型设计深度分析',
+    templateName: '车型解读',
     reason: 'DEMO DATA：演示自动匹配结果。'
   })
   repos.addVersion(projectId, 'V1 Base Draft', mockBaseDraft().script)

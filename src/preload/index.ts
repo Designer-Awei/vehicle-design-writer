@@ -15,8 +15,11 @@ const api: AppApi = {
     list: () => ipcRenderer.invoke(IPC.stylesList),
     get: (id) => ipcRenderer.invoke(IPC.stylesGet, id),
     create: (input) => ipcRenderer.invoke(IPC.stylesCreate, input),
+    createFromFolder: (input) => ipcRenderer.invoke(IPC.stylesCreateFromFolder, input),
     importFolder: (styleId) => ipcRenderer.invoke(IPC.stylesImportFolder, styleId),
+    replaceFolder: (styleId) => ipcRenderer.invoke(IPC.stylesReplaceFolder, styleId),
     extract: (styleId) => ipcRenderer.invoke(IPC.stylesExtract, styleId),
+    update: (id, patch) => ipcRenderer.invoke(IPC.stylesUpdate, id, patch),
     remove: (id) => ipcRenderer.invoke(IPC.stylesRemove, id)
   },
   projects: {
@@ -26,8 +29,13 @@ const api: AppApi = {
     update: (id, patch) => ipcRenderer.invoke(IPC.projectsUpdate, id, patch),
     addImages: (projectId) => ipcRenderer.invoke(IPC.projectsAddImages, projectId),
     removeImage: (imageId) => ipcRenderer.invoke(IPC.projectsRemoveImage, imageId),
+    updateImage: (imageId, patch) => ipcRenderer.invoke(IPC.projectsUpdateImage, imageId, patch),
     saveAnnotation: (annotation: ImageAnnotation) =>
       ipcRenderer.invoke(IPC.projectsSaveAnnotation, annotation),
+    removeAnnotation: (annotationId) =>
+      ipcRenderer.invoke(IPC.projectsRemoveAnnotation, annotationId),
+    analyzeVision: (projectId) => ipcRenderer.invoke(IPC.projectsAnalyzeVision, projectId),
+    analyzePfdbi: (projectId) => ipcRenderer.invoke(IPC.projectsAnalyzePfdbi, projectId),
     generate: (projectId) => ipcRenderer.invoke(IPC.projectsGenerate, projectId),
     rewrite: (projectId, selectedText, instruction) =>
       ipcRenderer.invoke(IPC.projectsRewrite, projectId, selectedText, instruction),
