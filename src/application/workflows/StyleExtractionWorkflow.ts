@@ -1,6 +1,7 @@
 import { mapPool } from '@application/async-pool'
 import { parseModelJson } from '@application/json-parse'
 import { ModelRouter } from '@application/model-router'
+import { deriveStyleNotes, pickContentType } from '@application/style-preview'
 import { normalizeExamples, normalizeTemplates } from '@application/style-extract-normalize'
 import type { Repositories } from '@infrastructure/db/repositories'
 import { logError } from '@infrastructure/logging/logger'
@@ -22,7 +23,7 @@ import {
   type StyleProfile,
   type StructureTemplate
 } from '@schemas/index'
-import { CONTENT_TYPES, LLM_REQUEST_CONCURRENCY } from '@shared/constants'
+import { LLM_REQUEST_CONCURRENCY, type ContentType } from '@shared/constants'
 import type { WorkflowProgress } from '@shared/ipc'
 import {
   documentAnalysisPrompt,
@@ -84,26 +85,39 @@ const DNA_SLICES = [
   }
 ] as const
 
+export interface StyleArtifacts {
+  profile: StyleProfile
+  templates: StructureTemplate[]
+  examples: ExampleCase[]
+  category: ContentType
+}
+
 /**
- * 多文案并行分析 → DNA 切片并行聚合 → 按内容类型并行出模板 → few-shot → 质量审查。
+ * 多文案并行分析 → DNA 切片并行聚合 → 抽出 1 个结构模板 → few-shot → 质量审查。
+ * 只产出结果，不写风格库；队列预览和旧的聚合提取共用。
  */
-export async function runStyleExtraction(
-  styleId: string,
-  ctx: StyleExtractionContext
-): Promise<void> {
-  const style = ctx.repos.getStyle(styleId)
-  if (!style) throw new Error('风格不存在')
-  const documents = ctx.repos.getDocumentContents(styleId)
+export async function extractStyleArtifacts(
+  documents: Array<{ id: string; filename: string; content: string }>,
+  ctx: StyleExtractionContext,
+  options: { creatorLabel: string; styleId?: string; jobId?: string }
+): Promise<StyleArtifacts> {
   if (documents.length === 0) throw new Error('请先导入至少 1 篇文案')
 
   const report = (stage: string, message: string, percent: number): void => {
-    ctx.onProgress?.({ styleId, stage, message, percent })
+    ctx.onProgress?.({
+      styleId: options.styleId,
+      jobId: options.jobId,
+      stage,
+      message,
+      percent
+    })
   }
 
   const model = ctx.router.select('json')
   report('document_analysis', `单篇分析 0/${documents.length}`, 8)
 
   let analyzed = 0
+  let lastAnalysisError: Error | null = null
   const analysisResults = await mapPool(documents, LLM_REQUEST_CONCURRENCY, async (doc) => {
     try {
       const prompt = documentAnalysisPrompt({
@@ -123,7 +137,8 @@ export async function runStyleExtraction(
       analysis.documentId = doc.id
       return analysis
     } catch (error) {
-      logError('style.document_analysis', error)
+      lastAnalysisError = error instanceof Error ? error : new Error(String(error))
+      logError('style.document_analysis', lastAnalysisError)
       return null
     } finally {
       analyzed += 1
@@ -136,7 +151,7 @@ export async function runStyleExtraction(
   })
   const analyses = analysisResults.filter((item): item is DocumentAnalysis => item != null)
   if (analyses.length === 0) {
-    throw new Error('全部样本文案分析失败或超时，请稍后重试。')
+    throw lastAnalysisError ?? new Error('全部样本文案分析失败或超时，请稍后重试。')
   }
 
   const compactAnalyses = JSON.stringify(
@@ -159,7 +174,7 @@ export async function runStyleExtraction(
       try {
         const prompt = styleSlicePrompt({
           slice: slice.promptSlice,
-          creator: `${style.name} / ${style.platform}`,
+          creator: options.creatorLabel,
           analyses: compactAnalyses
         })
         return await chatJson(
@@ -211,8 +226,7 @@ export async function runStyleExtraction(
   ])
 
   const profile = mergeStyleSlices(sliceResults)
-  ctx.repos.saveStyleProfile(styleId, profile)
-  ctx.repos.replaceExamples(styleId, normalizeExamples(exampleBundle.examples, documentIds))
+  const examples = normalizeExamples(exampleBundle.examples, documentIds)
 
   const profileSummary = JSON.stringify({
     creator: profile.creator,
@@ -229,50 +243,34 @@ export async function runStyleExtraction(
     }))
   )
 
-  report('templates', '并行生成结构模板', 62)
-  let templateDone = 0
-  const templateResults = await mapPool([...CONTENT_TYPES], LLM_REQUEST_CONCURRENCY, async (contentType) => {
-    try {
-      const prompt = templateOnePrompt({
-        contentType,
-        profile: profileSummary,
-        analyses: structureClues
-      })
-      const template = (await chatJson(
-        ctx,
-        model,
-        'template_generation',
-        prompt,
-        SingleTemplateSchema,
-        templateOneRepairInstruction(contentType),
-        1536
-      )) as StructureTemplate
-      return {
+  report('templates', '根据样本文案抽出结构模板', 62)
+  let templates: StructureTemplate[] = []
+  try {
+    const prompt = templateOnePrompt({
+      profile: profileSummary,
+      analyses: structureClues
+    })
+    const template = (await chatJson(
+      ctx,
+      model,
+      'template_generation',
+      prompt,
+      SingleTemplateSchema,
+      templateOneRepairInstruction(),
+      1536
+    )) as StructureTemplate
+    templates = normalizeTemplates([
+      {
         ...template,
-        templateName: template.templateName.includes(contentType)
-          ? template.templateName
-          : `${contentType}结构`,
-        applicableTopics:
-          template.applicableTopics.length > 0 ? template.applicableTopics : [contentType]
+        applicableTopics: []
       }
-    } catch (error) {
-      logError('style.template', error)
-      return null
-    } finally {
-      templateDone += 1
-      report(
-        'templates',
-        `结构模板 ${templateDone}/${CONTENT_TYPES.length}：${contentType}`,
-        62 + Math.round((templateDone / CONTENT_TYPES.length) * 14)
-      )
-    }
-  })
-  ctx.repos.replaceTemplates(
-    styleId,
-    normalizeTemplates(templateResults.filter((item): item is StructureTemplate => item != null))
-  )
+    ])
+  } catch (error) {
+    logError('style.template', error)
+  }
+  report('templates', '结构模板已完成', 76)
 
-  report('fewshot', '代表性片段已保存', 82)
+  report('fewshot', '代表性片段已整理', 82)
 
   report('quality', 'Style DNA 质量检查', 92)
   try {
@@ -284,7 +282,36 @@ export async function runStyleExtraction(
   } catch (error) {
     logError('style.quality', error)
   }
-  report('done', '风格已保存到风格库', 100)
+  report('done', '提取完成', 100)
+  return { profile, templates, examples, category: pickContentType(analyses) }
+}
+
+/**
+ * 旧入口：对已建档的风格聚合提取，并直接写入风格库。
+ */
+export async function runStyleExtraction(
+  styleId: string,
+  ctx: StyleExtractionContext
+): Promise<void> {
+  const style = ctx.repos.getStyle(styleId)
+  if (!style) throw new Error('风格不存在')
+  const documents = ctx.repos.getDocumentContents(styleId)
+  const artifacts = await extractStyleArtifacts(documents, ctx, {
+    creatorLabel: `${style.name} / ${style.platform}`,
+    styleId
+  })
+  const notes = deriveStyleNotes(artifacts.profile)
+  ctx.repos.saveStyleProfile(styleId, {
+    ...artifacts.profile,
+    creator: { ...artifacts.profile.creator, notes }
+  })
+  ctx.repos.replaceExamples(styleId, artifacts.examples)
+  ctx.repos.replaceTemplates(styleId, artifacts.templates)
+  ctx.repos.upsertStyle({
+    ...style,
+    notes
+  })
+  ctx.onProgress?.({ styleId, stage: 'done', message: '风格已保存到风格库', percent: 100 })
 }
 
 /**

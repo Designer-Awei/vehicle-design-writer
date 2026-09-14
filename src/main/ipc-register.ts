@@ -12,13 +12,16 @@ import {
 import { parseDocumentFile, hashFile } from '@infrastructure/filesystem/document-parser'
 import { isSupportedImage, storeImage, toDataUrl } from '@infrastructure/filesystem/image-store'
 import { encryptSecret } from '@infrastructure/security/secret-store'
+import { clipStyleNotes } from '@application/style-preview'
 import type {
   ImageAnnotation,
   LlmSettings,
+  PFDBIAnalysis,
   ScriptDraft,
   QualityReport,
   TemplateMatch
 } from '@schemas/index'
+import { PFDBIAnalysisSchema } from '@schemas/index'
 import {
   IPC,
   type CreateProjectInput,
@@ -26,11 +29,20 @@ import {
   type ProjectDetail,
   type ReferenceImageRecord,
   type StyleDetail,
+  type StyleIngestConfirmPatch,
   type StyleMetadataPatch,
   type StyleRecord
 } from '@shared/ipc'
 import { probeSiliconFlow } from '@application/probe-siliconflow'
 import { createLlm, readApiKey, type AppContext } from './app-context'
+import { popupAppMenu, type AppMenuId } from './app-menu'
+import {
+  confirmStyleIngestJob,
+  discardStyleIngestJob,
+  enqueueStyleDocuments,
+  retryStyleIngestJob,
+  startStyleIngestQueue
+} from './style-ingest-queue'
 import {
   DEFAULT_BASE_URL,
   DEFAULT_TEXT_MODEL,
@@ -91,7 +103,7 @@ export function registerIpc(ctx: AppContext): void {
         name: input.name,
         platform: input.platform,
         category: input.category,
-        notes: input.notes,
+        notes: clipStyleNotes(input.notes),
         isDemo: false
       })
     }
@@ -107,7 +119,7 @@ export function registerIpc(ctx: AppContext): void {
         name: input.name,
         platform: input.platform,
         category: input.category,
-        notes: input.notes,
+        notes: clipStyleNotes(input.notes),
         isDemo: false
       })
       try {
@@ -157,6 +169,27 @@ export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(IPC.stylesRemove, (_event, id: string) => {
     ctx.repos.deleteStyle(id)
   })
+  ipcMain.handle(IPC.stylesIngestPick, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const picked = await dialog.showOpenDialog(window!, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '文案', extensions: ['txt', 'md', 'rtf'] }]
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return []
+    return enqueueStyleDocuments(ctx, picked.filePaths)
+  })
+  ipcMain.handle(IPC.stylesJobsList, () => ctx.repos.listIngestJobs())
+  ipcMain.handle(IPC.stylesJobRetry, (_event, jobId: string) => retryStyleIngestJob(ctx, jobId))
+  ipcMain.handle(
+    IPC.stylesJobConfirm,
+    (_event, jobId: string, patch: StyleIngestConfirmPatch) =>
+      confirmStyleIngestJob(ctx, jobId, patch)
+  )
+  ipcMain.handle(IPC.stylesJobDiscard, (_event, jobId: string) => {
+    discardStyleIngestJob(ctx, jobId)
+  })
+
+  startStyleIngestQueue(ctx)
 
   ipcMain.handle(IPC.projectsList, () => ctx.repos.listProjects())
   ipcMain.handle(IPC.projectsGet, (_event, id: string) => getProjectDetail(ctx, id))
@@ -168,6 +201,7 @@ export function registerIpc(ctx: AppContext): void {
       title: input.topic.slice(0, 40) || '未命名文案',
       topic: input.topic,
       draft: input.draft,
+      facts: input.facts ?? '',
       platform: input.platform,
       durationSeconds: input.durationSeconds,
       contentType: input.contentType,
@@ -206,6 +240,7 @@ export function registerIpc(ctx: AppContext): void {
         title: patch.title ?? current.title,
         topic: patch.topic ?? current.topic,
         draft: patch.draft ?? current.draft,
+        facts: patch.facts ?? current.facts,
         platform: patch.platform ?? current.platform,
         durationSeconds: patch.durationSeconds ?? current.durationSeconds,
         contentType: patch.contentType ?? current.contentType,
@@ -215,20 +250,6 @@ export function registerIpc(ctx: AppContext): void {
         updatedAt: nowIso()
       }
       ctx.repos.upsertProject(next)
-      if (patch.topic !== undefined && patch.topic !== current.topic) {
-        ctx.repos.clearFromPfdbi(id)
-      } else if (
-        (patch.draft !== undefined && patch.draft !== current.draft) ||
-        (patch.platform !== undefined && patch.platform !== current.platform) ||
-        (patch.durationSeconds !== undefined &&
-          patch.durationSeconds !== current.durationSeconds) ||
-        (patch.contentType !== undefined && patch.contentType !== current.contentType) ||
-        (patch.styleId !== undefined && patch.styleId !== current.styleId) ||
-        (patch.commercial !== undefined &&
-          JSON.stringify(patch.commercial) !== JSON.stringify(current.commercial))
-      ) {
-        ctx.repos.clearDrafts(id)
-      }
       if (patch.finalScript != null) {
         const finalDraft = ctx.repos.getScript<ScriptDraft>(id, 'final') ?? {
           title: next.title,
@@ -236,8 +257,11 @@ export function registerIpc(ctx: AppContext): void {
           script: patch.finalScript,
           pfdbiReferences: []
         }
-        ctx.repos.saveScript(id, 'final', { ...finalDraft, script: patch.finalScript })
-        ctx.repos.addVersion(id, 'V Manual', patch.finalScript)
+        ctx.repos.saveScript(id, 'final', {
+          ...finalDraft,
+          title: next.title,
+          script: patch.finalScript
+        })
       }
       return getProjectDetail(ctx, id)
     }
@@ -294,6 +318,11 @@ export function registerIpc(ctx: AppContext): void {
       router,
       onProgress: (progress) => event.sender.send(IPC.workflowProgress, progress)
     })
+    return getProjectDetail(ctx, projectId)
+  })
+  ipcMain.handle(IPC.projectsSavePfdbi, (_event, projectId: string, analysis: PFDBIAnalysis) => {
+    const parsed = PFDBIAnalysisSchema.parse(analysis)
+    ctx.repos.savePfdbi(projectId, parsed, `human:${projectId}`)
     return getProjectDetail(ctx, projectId)
   })
   ipcMain.handle(IPC.projectsGenerate, async (event, projectId: string) => {
@@ -367,6 +396,11 @@ export function registerIpc(ctx: AppContext): void {
     const picked = await dialog.showSaveDialog(window!, { defaultPath: defaultName })
     return picked.canceled ? null : (picked.filePath ?? null)
   })
+  ipcMain.handle(IPC.menuPopup, (event, id: AppMenuId, x: number, y: number) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return
+    popupAppMenu(window, id, x, y)
+  })
 }
 
 function getSettings(ctx: AppContext): LlmSettings {
@@ -400,7 +434,7 @@ function updateStyleMetadata(ctx: AppContext, id: string, patch: StyleMetadataPa
     name,
     platform,
     category,
-    notes: patch.notes ?? current.notes
+    notes: patch.notes !== undefined ? clipStyleNotes(patch.notes) : current.notes
   })
 }
 

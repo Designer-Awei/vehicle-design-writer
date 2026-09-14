@@ -1,23 +1,20 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppContext } from './app-context'
 import { registerIpc } from './ipc-register'
+import { installDefaultMenu, TITLEBAR_OVERLAY } from './app-menu'
 
 /**
- * 创建主窗口。
+ * 创建主窗口。Windows 用深色自定义顶栏对齐内容区，右侧保留系统窗口按钮。
  */
 function createWindow(): void {
-  const windowsFrame =
+  const windowsChrome =
     process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden' as const,
-          titleBarOverlay: {
-            color: '#120f0c',
-            symbolColor: '#f3ece1',
-            height: 32
-          }
+          titleBarOverlay: { ...TITLEBAR_OVERLAY }
         }
       : {}
   const mainWindow = new BrowserWindow({
@@ -29,7 +26,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     title: '汽车设计文案助手',
     backgroundColor: '#0c0b0a',
-    ...windowsFrame,
+    ...windowsChrome,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -56,7 +53,9 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = 'dark'
   electronApp.setAppUserModelId('com.vehicle-design-writer')
+  installDefaultMenu()
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })

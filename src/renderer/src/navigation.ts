@@ -5,7 +5,6 @@
 export function isPrimaryActive(pathname: string, to: string): boolean {
   if (to === '/') return pathname === '/'
   if (to === '/workbench') return pathname.startsWith('/workbench')
-  if (to === '/styles') return pathname.startsWith('/styles')
   if (to === '/settings') return pathname.startsWith('/settings')
   return pathname === to || pathname.startsWith(`${to}/`)
 }
@@ -15,15 +14,15 @@ export const WORKBENCH_MENU = [
   { id: 'new', label: '新建文案', to: '/workbench/new' }
 ] as const
 
-export const STYLE_STAGES = [
-  { id: 'list', label: '风格列表', to: '/styles' },
-  { id: 'new', label: '新增风格', to: '/styles/new' }
+/** 打开项目后的纵向二级标签。 */
+export const PROJECT_TABS = [
+  { id: 'topic', label: '选题想法' },
+  { id: 'visuals', label: '视觉素材' },
+  { id: 'analysis', label: '设计分析' },
+  { id: 'draft', label: '初稿文案' }
 ] as const
 
-export const WORKFLOW_STAGES = [
-  { id: 'images', label: '参考图与标注' },
-  { id: 'vision', label: '视觉观察' },
-  { id: 'pfdbi', label: 'PFDBI 评价' },
-  { id: 'brief', label: '成稿设置' },
-  { id: 'script', label: '文案编辑' }
-] as const
+export type ProjectTabId = (typeof PROJECT_TABS)[number]['id']
+
+/** 风格库入口已下线，仅避免未接线页面编译失败。 */
+export const STYLE_STAGES = [{ id: 'list', label: '文案工作台', to: '/workbench' }] as const

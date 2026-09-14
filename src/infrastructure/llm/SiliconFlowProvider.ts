@@ -109,9 +109,52 @@ export class SiliconFlowProvider implements LLMProvider {
     if (!response.ok) {
       const detail = await response.text()
       logError('llm.http', new Error(`status=${response.status}`))
-      throw new Error(`SiliconFlow 请求失败（${response.status}）：${detail.slice(0, 300)}`)
+      throw new Error(describeSiliconFlowHttpError(response.status, detail))
     }
     return (await response.json()) as SiliconFlowPayload
+  }
+}
+
+/**
+ * 把 SiliconFlow HTTP 错误收成可直接展示的中文，避免任务列表只看到“超时”。
+ */
+export function describeSiliconFlowHttpError(status: number, body: string): string {
+  const parsed = parseJsonObject(body)
+  const raw =
+    (typeof parsed?.message === 'string' && parsed.message) ||
+    (typeof parsed?.error === 'string' && parsed.error) ||
+    body
+  const code = parsed?.code
+  const haystack = `${status} ${code ?? ''} ${raw}`.toLowerCase()
+  if (status === 402 || code === 30001 || /insufficient|balance|余额不足/u.test(haystack)) {
+    return 'SiliconFlow 账户余额不足，请充值后再试。也可到设置页清空 API Key，改用演示模式提取。'
+  }
+  if (status === 401 || /unauthorized|invalid api key|incorrect api key/u.test(haystack)) {
+    return 'SiliconFlow API Key 无效或已过期，请到设置页检查。'
+  }
+  if (status === 429 || /rate limit|too many requests|频繁/u.test(haystack)) {
+    return 'SiliconFlow 请求过于频繁，请稍后再试。'
+  }
+  const snippet = raw.replace(/\s+/gu, ' ').trim().slice(0, 180)
+  return snippet ? `SiliconFlow 请求失败（${status}）：${snippet}` : `SiliconFlow 请求失败（${status}）`
+}
+
+/**
+ * 余额不足或 Key 无效时，继续排队只会重复失败。
+ */
+export function isUnrecoverableProviderError(message: string): boolean {
+  return /账户余额不足|API Key 无效|已过期/u.test(message)
+}
+
+/**
+ * 尝试从 SiliconFlow 错误正文里取出 JSON 字段。
+ */
+function parseJsonObject(text: string): { message?: unknown; error?: unknown; code?: unknown } | null {
+  try {
+    const value = JSON.parse(text) as unknown
+    return value && typeof value === 'object' ? (value as { message?: unknown; error?: unknown; code?: unknown }) : null
+  } catch {
+    return null
   }
 }
 

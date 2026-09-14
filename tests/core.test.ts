@@ -8,7 +8,8 @@ import {
   stripRtf
 } from '../src/infrastructure/filesystem/document-parser'
 import { parseJsonObject, repairJson as repair } from '../src/schemas/common'
-import { estimateDuration } from '../src/application/duration'
+import { describeSiliconFlowHttpError, isUnrecoverableProviderError } from '../src/infrastructure/llm/SiliconFlowProvider'
+import { DEFAULT_DURATION, estimateDuration } from '../src/application/duration'
 import {
   coerceImageRole,
   ImageRoleSchema,
@@ -21,13 +22,16 @@ import {
   ExampleBundleSchema,
   SingleTemplateSchema,
   StyleCreatorToneSliceSchema,
-  StyleLanguageSliceSchema
+  StyleLanguageSliceSchema,
+  StyleSelectSchema,
+  TemplateMatchSchema
 } from '../src/schemas/index'
 import { ScoreSchema } from '../src/schemas/common'
 import {
   mockPfdbi,
   mockStyleProfile,
   mockTemplates,
+  mockExamples,
   mockVision
 } from '../src/infrastructure/llm/mock-payloads'
 import { ModelRouter } from '../src/application/model-router'
@@ -36,9 +40,14 @@ import { mapPool } from '../src/application/async-pool'
 import { inferCapability } from '../src/infrastructure/llm/capability'
 import { MockLLMProvider } from '../src/infrastructure/llm/MockLLMProvider'
 import { parseModelJson } from '../src/application/json-parse'
+import { baseDraftPrompt } from '../src/prompts/index'
 import { AppDatabase } from '../src/infrastructure/db/database'
 import { Repositories } from '../src/infrastructure/db/repositories'
-import { runVisionAnalysis } from '../src/application/workflows/DraftGenerationWorkflow'
+import { runDraftGeneration, runPfdbiAnalysis, runVisionAnalysis } from '../src/application/workflows/DraftGenerationWorkflow'
+import { buildStylePreview, clipStyleNotes, deriveStyleNotes, pickContentType } from '../src/application/style-preview'
+import { STYLE_NOTES_LIMIT, WORDS_PER_MINUTE } from '../src/shared/constants'
+import { countCopyWords } from '../src/renderer/src/lib/text'
+import { notesFromPfdbi, pfdbiFromNotes } from '../src/renderer/src/lib/pfdbi-notes'
 
 describe('document parser', () => {
   it('counts chinese and latin words', () => {
@@ -73,6 +82,17 @@ describe('json repair', () => {
   })
 })
 
+describe('siliconflow errors', () => {
+  it('explains insufficient account balance instead of a generic timeout', () => {
+    const message = describeSiliconFlowHttpError(
+      402,
+      '{"code":30001,"message":"Sorry, your account balance is insufficient","data":null}'
+    )
+    expect(message).toContain('账户余额不足')
+    expect(isUnrecoverableProviderError(message)).toBe(true)
+  })
+})
+
 describe('duration', () => {
   it('estimates words from minutes', () => {
     const result = estimateDuration('测'.repeat(290), 60, {
@@ -85,6 +105,23 @@ describe('duration', () => {
     expect(result.targetWords).toBe(290)
     expect(result.actualWords).toBe(290)
     expect(result.warning).toBeNull()
+  })
+})
+
+describe('base draft facts', () => {
+  it('puts fact notes into the base draft prompt without mixing them into the opinion draft', () => {
+    const prompt = baseDraftPrompt({
+      topic: '前脸为什么越来越像',
+      draft: '想吐槽同质化',
+      facts: '轴距 3000mm',
+      durationSeconds: 300,
+      platform: 'B站',
+      pfdbi: '{}',
+      wordsPerMinute: 180
+    })
+    expect(prompt.user).toContain('轴距 3000mm')
+    expect(prompt.user).toContain('想吐槽同质化')
+    expect(prompt.system).toContain('事实补充')
   })
 })
 
@@ -307,13 +344,13 @@ describe('schemas', () => {
 describe('model router', () => {
   it('selects configured models', () => {
     const router = new ModelRouter({
-      textModel: 'deepseek-ai/DeepSeek-V4-Flash',
+      textModel: 'Qwen/Qwen3.5-27B',
       visionModel: 'Qwen/Qwen3-VL-32B-Instruct'
     })
-    expect(router.select('text')).toContain('DeepSeek')
+    expect(router.select('text')).toContain('Qwen3.5-27B')
     expect(router.select('vision')).toContain('VL')
     expect(inferCapability('Qwen/Qwen3-VL-32B-Instruct').supportsVision).toBe(true)
-    expect(inferCapability('deepseek-ai/DeepSeek-V4-Flash').supportsVision).toBe(false)
+    expect(inferCapability('Qwen/Qwen3.5-27B').supportsVision).toBe(false)
   })
 })
 
@@ -335,6 +372,49 @@ describe('mock llm', () => {
 })
 
 describe('project evidence lifecycle', () => {
+  it('reads old pfdbi rows that omit comparison arrays', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-pfdbi-legacy-'))
+    const db = new AppDatabase(join(dir, 'test.db'))
+    const repos = new Repositories(db)
+    try {
+      const now = new Date().toISOString()
+      repos.upsertProject({
+        id: 'proj_legacy',
+        title: 'legacy',
+        topic: 'legacy',
+        draft: '',
+        facts: '',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '设计观点',
+        styleId: null,
+        commercial: {
+          enabled: false,
+          brand: '',
+          model: '',
+          goal: '',
+          sellingPoints: [],
+          mustInclude: [],
+          mustAvoid: [],
+          placement: 'narrative',
+          cta: ''
+        },
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now
+      })
+      const legacy = { ...mockPfdbi() } as Record<string, unknown>
+      delete legacy.peerComparisons
+      db.run(
+        'INSERT INTO pfdbi_analyses(id, project_id, json, cache_key, created_at) VALUES(?,?,?,?,?)',
+        ['pfdbi_legacy', 'proj_legacy', JSON.stringify(legacy), '', now]
+      )
+      expect(repos.getPfdbi('proj_legacy')?.peerComparisons).toEqual([])
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
   it('invalidates vision and downstream artifacts when annotations change', () => {
     const dir = mkdtempSync(join(tmpdir(), 'vdw-test-'))
     const db = new AppDatabase(join(dir, 'test.db'))
@@ -346,6 +426,7 @@ describe('project evidence lifecycle', () => {
         title: 'test',
         topic: 'test',
         draft: '',
+        facts: '',
         platform: 'B站',
         durationSeconds: 300,
         contentType: '车型解读',
@@ -407,6 +488,7 @@ describe('project evidence lifecycle', () => {
         title: 'test',
         topic: 'test',
         draft: '',
+        facts: '',
         platform: 'B站',
         durationSeconds: 300,
         contentType: '新车热点',
@@ -431,6 +513,46 @@ describe('project evidence lifecycle', () => {
       await expect(runVisionAnalysis('proj_2', { repos, provider, router })).rejects.toThrow(
         '请先上传至少一张参考图'
       )
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('persists facts independently from the opinion draft', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-facts-'))
+    const db = new AppDatabase(join(dir, 'test.db'))
+    const repos = new Repositories(db)
+    try {
+      const now = new Date().toISOString()
+      repos.upsertProject({
+        id: 'proj_facts',
+        title: 'test',
+        topic: 'test',
+        draft: '想吐槽同质化',
+        facts: '轴距 3000mm；发布会称这是家族最新灯语。',
+        platform: 'B站',
+        durationSeconds: 300,
+        contentType: '新车热点',
+        styleId: null,
+        commercial: {
+          enabled: false,
+          brand: '',
+          model: '',
+          goal: '',
+          sellingPoints: [],
+          mustInclude: [],
+          mustAvoid: [],
+          placement: 'narrative',
+          cta: ''
+        },
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now
+      })
+      const stored = repos.getProject('proj_facts')
+      expect(stored?.draft).toBe('想吐槽同质化')
+      expect(stored?.facts).toContain('轴距 3000mm')
     } finally {
       db.close()
       rmSync(dir, { recursive: true, force: true })
@@ -500,3 +622,235 @@ describe('style metadata', () => {
     }
   })
 })
+
+describe('style ingest preview', () => {
+  it('uses filename as author when the model left a placeholder name', () => {
+    const profile = mockStyleProfile()
+    profile.creator.name = '未命名创作者'
+    const preview = buildStylePreview(
+      { profile, templates: mockTemplates(), examples: mockExamples() },
+      { filename: '博主口播.txt', wordCount: 1200 }
+    )
+    expect(preview.author).toBe('博主口播')
+    expect(preview.sourceFilename).toBe('博主口播.txt')
+    expect(preview.category).toBe('车型解读')
+    expect(preview.notes.length).toBeLessThanOrEqual(STYLE_NOTES_LIMIT)
+    expect(preview.notes).toBe('口语拆前脸配方')
+  })
+
+  it('uses the card content-type tag instead of template names', () => {
+    const preview = buildStylePreview(
+      {
+        profile: mockStyleProfile(),
+        templates: mockTemplates(),
+        examples: mockExamples(),
+        category: '设计知识'
+      },
+      { filename: '圆方形.txt', wordCount: 800 }
+    )
+    expect(preview.category).toBe('设计知识')
+    expect(pickContentType([{ contentType: '车型解读', topic: '圆方三角' }])).toBe('车型解读')
+  })
+
+  it('keeps preview jobs out of the creation catalog until they become a style with DNA', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-ingest-'))
+    const db = new AppDatabase(join(dir, 'test.db'))
+    const repos = new Repositories(db)
+    try {
+      const job = repos.insertIngestJob({
+        filename: 'sample.txt',
+        content: '这篇口播在讲灯组图形。',
+        wordCount: 12,
+        parseStatus: 'ok',
+        parseError: null,
+        status: 'queued'
+      })
+      expect(job.status).toBe('queued')
+      expect(repos.listCatalogStyles()).toEqual([])
+      const preview = buildStylePreview(
+        { profile: mockStyleProfile(), templates: mockTemplates(), examples: mockExamples() },
+        { filename: job.filename, wordCount: job.wordCount }
+      )
+      repos.updateIngestJobStatus(job.id, 'completed', {
+        preview,
+        progressPercent: 100,
+        progressMessage: '预览卡已完成，等待确认入库'
+      })
+      expect(repos.getIngestJob(job.id)?.preview?.author).toContain('演示创作者')
+      expect(repos.listCatalogStyles()).toEqual([])
+
+      repos.upsertStyle({
+        id: 'style_ingested',
+        name: `${preview.author} · ${preview.category}`,
+        platform: preview.platform || 'B站',
+        category: preview.category,
+        notes: '',
+        isDemo: false
+      })
+      repos.saveStyleProfile('style_ingested', preview.profile)
+      repos.replaceTemplates('style_ingested', preview.templates)
+      repos.updateIngestJobStatus(job.id, 'ingested', { styleId: 'style_ingested' })
+      expect(repos.listCatalogStyles().some((item) => item.id === 'style_ingested')).toBe(true)
+      expect(repos.listCatalogStyles()[0]?.notes).toBe('口语拆前脸配方')
+      expect(repos.getIngestJobContent(job.id)).toContain('灯组图形')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('style notes', () => {
+  it('clips extracted notes to 20 characters and prefers a clause break', () => {
+    expect(clipStyleNotes('口语拆前脸配方')).toBe('口语拆前脸配方')
+    expect(clipStyleNotes('口语讲灯组细节，再落到肩线记忆点上')).toBe('口语讲灯组细节')
+    expect(clipStyleNotes('口'.repeat(25))).toBe('口'.repeat(STYLE_NOTES_LIMIT))
+  })
+
+  it('derives a short blurb from Style DNA when the model omitted notes', () => {
+    const profile = mockStyleProfile()
+    profile.creator.notes = ''
+    profile.creator.description = '口语讲灯组细节，再用肩线收判断。'
+    expect(deriveStyleNotes(profile)).toBe('口语讲灯组细节')
+  })
+})
+
+describe('agent style select', () => {
+  it('treats empty styleId as a neutral fallback', () => {
+    expect(StyleSelectSchema.parse({ styleId: 'none', reason: '不合适' }).styleId).toBe('')
+    expect(TemplateMatchSchema.parse({ templateName: '车型解读', reason: '匹配', styleId: null, styleName: '中性结构' }).styleName).toBe(
+      '中性结构'
+    )
+  })
+
+  it('allows PFDBI without reference images', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-pfdbi-empty-'))
+    const db = new AppDatabase(join(dir, 'test.db'))
+    const repos = new Repositories(db)
+    try {
+      const now = new Date().toISOString()
+      repos.upsertProject({
+        id: 'proj_noimg',
+        title: '无图项目',
+        topic: '只谈设计史',
+        draft: '',
+        facts: '',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '设计知识',
+        styleId: null,
+        commercial: {
+          enabled: false,
+          brand: '',
+          model: '',
+          goal: '',
+          sellingPoints: [],
+          mustInclude: [],
+          mustAvoid: [],
+          placement: 'narrative',
+          cta: ''
+        },
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now
+      })
+      const provider = new MockLLMProvider()
+      const router = new ModelRouter({ textModel: 'mock-text', visionModel: 'mock-vision' })
+      await runPfdbiAnalysis('proj_noimg', { repos, provider, router })
+      expect(repos.getPfdbi('proj_noimg')?.coreConclusion).toContain('没有参考图')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('picks an ingested style card when the author did not override', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-style-select-'))
+    const db = new AppDatabase(join(dir, 'test.db'))
+    const repos = new Repositories(db)
+    try {
+      const now = new Date().toISOString()
+      repos.upsertStyle({
+        id: 'style_pick',
+        name: '入库卡 · 车型解读',
+        platform: 'B站',
+        category: '车型解读',
+        notes: '',
+        isDemo: false
+      })
+      repos.saveStyleProfile('style_pick', mockStyleProfile())
+      repos.replaceTemplates('style_pick', mockTemplates())
+      repos.replaceExamples('style_pick', mockExamples())
+      repos.upsertProject({
+        id: 'proj_pick',
+        title: '选卡',
+        topic: '前脸为什么越来越像',
+        draft: '',
+        facts: '轴距 3000mm',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '车型解读',
+        styleId: null,
+        commercial: {
+          enabled: false,
+          brand: '',
+          model: '',
+          goal: '',
+          sellingPoints: [],
+          mustInclude: [],
+          mustAvoid: [],
+          placement: 'narrative',
+          cta: ''
+        },
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now
+      })
+      repos.savePfdbi('proj_pick', mockPfdbi(), 'cache_pick')
+      const provider = new MockLLMProvider()
+      const router = new ModelRouter({ textModel: 'mock-text', visionModel: 'mock-vision' })
+      await runDraftGeneration('proj_pick', { repos, provider, router })
+      const match = repos.getScript<{ styleId?: string | null; styleName?: string }>('proj_pick', 'match')
+      expect(match?.styleId).toBe('style_pick')
+      expect(match?.styleName).toContain('入库卡')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('copy word count', () => {
+  it('counts chinese characters and latin words', () => {
+    expect(countCopyWords('姿态很好 design language')).toBe(6)
+    expect(countCopyWords('')).toBe(0)
+  })
+
+  it('uses 250 words per minute for duration targets', () => {
+    expect(WORDS_PER_MINUTE).toBe(250)
+    expect(DEFAULT_DURATION.wordsPerMinute).toBe(250)
+  })
+})
+
+describe('human pfdbi notes', () => {
+  it('writes judgements back into each PFDBI dimension', () => {
+    const analysis = pfdbiFromNotes(
+      '前脸为什么越来越像',
+      {
+        P: '姿态更低、更宽',
+        F: '',
+        D: '灯组收得更紧',
+        B: '',
+        I: ''
+      },
+      null
+    )
+    expect(analysis.P.judgement).toBe('姿态更低、更宽')
+    expect(analysis.P.applicable).toBe(true)
+    expect(analysis.F.applicable).toBe(false)
+    expect(analysis.D.observations).toEqual(['灯组收得更紧'])
+    expect(notesFromPfdbi(analysis).P).toBe('姿态更低、更宽')
+    expect(notesFromPfdbi(analysis).D).toBe('灯组收得更紧')
+  })
+})
+

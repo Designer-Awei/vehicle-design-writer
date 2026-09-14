@@ -1,4 +1,3 @@
-import { CONTENT_TYPES } from '@shared/constants'
 import { toUsage } from './capability'
 import {
   mockBaseDraft,
@@ -9,6 +8,7 @@ import {
   mockQuality,
   mockStyleProfile,
   mockStyleQuality,
+  mockStyleSelect,
   mockTemplateMatch,
   mockTemplates,
   mockVision
@@ -51,6 +51,17 @@ function resolvePayload(task: LLMTask, prompt: string): unknown {
   }
   if (task === 'pfdbi') {
     const result = mockPfdbi()
+    if (prompt.includes('没有参考图')) {
+      result.coreConclusion = '当前没有参考图，型面与灯组证据不足，不能把想象中的外观写成看见的事实。'
+      result.P.applicable = false
+      result.F.applicable = false
+      result.D.applicable = false
+      result.P.judgement = '暂无足够证据'
+      result.F.judgement = '暂无足够证据'
+      result.D.judgement = '暂无足够证据'
+      result.facts = ['没有参考图，未观察到型面']
+      result.inferences = ['后续补图后再评价外观']
+    }
     if (prompt.includes('"role":"other"')) {
       result.peerComparisons = [
         {
@@ -71,15 +82,11 @@ function resolvePayload(task: LLMTask, prompt: string): unknown {
   }
   if (task === 'style_aggregation') return mockStyleProfile()
   if (task === 'template_generation') {
-    const templates = mockTemplates()
-    const hit = CONTENT_TYPES.find((type) => prompt.includes(`内容类型：${type}`))
-    const base =
-      templates.find((item) => item.templateName === hit || item.applicableTopics.includes(hit ?? '')) ??
-      templates[0]
+    const base = mockTemplates()[0]
     return {
       ...base,
-      templateName: `${hit ?? base.templateName}结构`,
-      applicableTopics: hit ? [hit] : base.applicableTopics
+      templateName: '现象开场后拆证据',
+      applicableTopics: []
     }
   }
   if (task === 'fewshot_generation') return { examples: mockExamples() }
@@ -87,6 +94,7 @@ function resolvePayload(task: LLMTask, prompt: string): unknown {
   if (task === 'style_adapter' || task === 'commercial_adapter') return mockFinalScript()
   if (task === 'script_quality') return mockQuality()
   if (task === 'template_match') return mockTemplateMatch()
+  if (task === 'style_select') return mockStyleSelect(prompt)
   if (task === 'rewrite' || task === 'json_repair') {
     return { text: prompt.slice(-400) }
   }

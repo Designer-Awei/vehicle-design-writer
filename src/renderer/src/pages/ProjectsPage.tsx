@@ -41,7 +41,7 @@ export function ProjectsPage(): React.JSX.Element {
     <div className="page-fill">
       <div>
         <h2 className="text-xl font-semibold">已有项目</h2>
-        <p className="mt-1 text-sm text-[#9a8f82]">继续编辑、生成或管理你的汽车设计文案。</p>
+        <p className="mt-1 text-sm text-[#9a8f82]">继续写选题、补视觉素材、做设计分析或改初稿。</p>
       </div>
       {projects.map((project) => (
         <article key={project.id} className="project-list-item">

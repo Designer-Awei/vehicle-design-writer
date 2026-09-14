@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FieldInline } from '@renderer/components/FieldInline'
 import { ipcErrorMessage } from '@renderer/lib/utils'
-import { PLATFORMS, STYLE_CATEGORIES } from '@shared/constants'
+import { PLATFORMS, STYLE_CATEGORIES, STYLE_NOTES_LIMIT } from '@shared/constants'
 import type { StyleMetadataPatch, StyleRecord } from '@shared/ipc'
 
 /**
- * 已创建风格的档案信息编辑：名称、平台、内容类型、备注，变更后立即保存。
+ * 已创建风格的档案信息编辑：名称、平台、内容类型、风格简介，变更后立即保存。
  */
 export function StyleMetaEditor({
   style,
@@ -103,15 +103,18 @@ export function StyleMetaEditor({
           ))}
         </select>
       </FieldInline>
-      <FieldInline label="备注" htmlFor="styleEditNotes">
+      <FieldInline label="风格简介" htmlFor="styleEditNotes">
         <input
           id="styleEditNotes"
           className="rounded bg-[#0c0b0a] px-3 py-2 text-[#f3ece1]"
-          placeholder="选填"
+          maxLength={STYLE_NOTES_LIMIT}
+          placeholder="提取时自动生成，20字以内"
           value={notes}
-          onChange={(event) => setNotes(event.target.value)}
+          onChange={(event) => setNotes(event.target.value.slice(0, STYLE_NOTES_LIMIT))}
           onBlur={() => {
-            if (notes !== style.notes) void persist({ notes })
+            const next = notes.trim().slice(0, STYLE_NOTES_LIMIT)
+            setNotes(next)
+            if (next !== style.notes) void persist({ notes: next })
           }}
         />
       </FieldInline>

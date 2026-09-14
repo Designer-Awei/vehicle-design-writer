@@ -7,6 +7,7 @@ import type {
   StyleProfile,
   StyleQuality,
   StructureTemplate,
+  StyleSelect,
   TemplateMatch,
   VisionObservation
 } from '@schemas/index'
@@ -139,7 +140,8 @@ export const mockStyleProfile = (): StyleProfile => ({
   creator: {
     name: '演示创作者 A（DEMO DATA）',
     platform: 'B站',
-    description: '虚构的汽车设计评论口播风格，仅用于产品演示，不是真实博主文案。'
+    description: '虚构的汽车设计评论口播风格，仅用于产品演示，不是真实博主文案。',
+    notes: '口语拆前脸配方'
   },
   tone: {
     professionalism: 0.78,
@@ -271,6 +273,7 @@ export const mockExamples = (): ExampleCase[] => [
 export const mockDocumentAnalysis = (documentId: string): DocumentAnalysis => ({
   documentId,
   topic: '汽车设计评论',
+  contentType: '设计观点',
   structure: ['现象开场', '拆观察', '给判断'],
   languageTraits: ['口播短句', '术语后立刻解释'],
   argumentationTraits: ['观点先行', '主动留反例'],
@@ -299,6 +302,20 @@ export const mockTemplateMatch = (): TemplateMatch => ({
   templateName: '车型解读',
   reason: '选题是对一类车型前脸现象的设计评价，适合把 PFDBI 完整走一遍。'
 })
+
+/**
+ * Demo Mode 从目录里挑第一张已入库卡；没有目录则用中性结构。
+ */
+export const mockStyleSelect = (prompt: string): StyleSelect => {
+  const match = prompt.match(/"id"\s*:\s*"([^"]+)"/u)
+  if (!match) {
+    return { styleId: '', reason: 'DEMO：风格库为空，使用中性结构。' }
+  }
+  return {
+    styleId: match[1],
+    reason: 'DEMO：选题与该风格卡内容类型接近，用它的结构模板组织口播。'
+  }
+}
 
 export const mockFinalScript = (): ScriptDraft => ({
   title: '新能源前脸为什么越来越像',

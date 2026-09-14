@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CONTENT_TYPES } from '@shared/constants'
 import { ScoreSchema, StringArraySchema } from './common'
 
 const MissingText = '样本中未体现'
@@ -20,12 +21,15 @@ const CreatorSchema = z
   .object({
     name: z.string().catch('未命名创作者'),
     platform: z.string().catch('未知平台'),
-    description: z.string().catch(MissingText)
+    description: z.string().catch(MissingText),
+    /** 不超过 20 字的风格简介，供卡片展示和创作选卡。 */
+    notes: z.string().catch('')
   })
   .catch({
     name: '未命名创作者',
     platform: '未知平台',
-    description: MissingText
+    description: MissingText,
+    notes: ''
   })
 
 const ToneSchema = z
@@ -478,7 +482,8 @@ export const DocumentAnalysisSchema = z.preprocess(
     languageTraits: StringArraySchema,
     argumentationTraits: StringArraySchema,
     signatureLines: StringArraySchema,
-    designKnowledgeVsStyle: z.string().catch('样本中未明确区分设计知识与个人风格。')
+    designKnowledgeVsStyle: z.string().catch('样本中未明确区分设计知识与个人风格。'),
+    contentType: z.enum(CONTENT_TYPES).catch('设计观点')
   })
 )
 

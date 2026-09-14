@@ -33,7 +33,7 @@ export function seedIfEmpty(repos: Repositories): void {
     name: '演示创作者 A（DEMO DATA）',
     platform: 'B站',
     category: '设计观点',
-    notes: '虚构演示风格，不是真实博主文案。',
+    notes: '口语拆前脸配方',
     isDemo: true,
     createdAt: now
   })
@@ -74,6 +74,8 @@ export function seedIfEmpty(repos: Repositories): void {
     title: '演示项目：新能源前脸为什么越来越像（DEMO DATA）',
     topic: '为什么现在很多新能源汽车前脸越来越像？',
     draft: '感觉最近新车前脸都在用细灯带和封闭中网，想做成一期 5 分钟 B 站口播。',
+    facts:
+      '用户粘贴的事实补充（DEMO DATA）：多家新车发布会把贯穿灯带和封闭前脸称为家族最新识别；具体灯腔结构和进气开口以实车图为准，未在画面上确认的参数待核实。',
     platform: 'B站',
     durationSeconds: 300,
     contentType: '新车热点',

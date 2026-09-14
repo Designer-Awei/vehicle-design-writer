@@ -1,26 +1,23 @@
 # vehicle-design-writer
 
-汽车设计文案助手。面向汽车设计与审美内容团队的 Electron 桌面工具：用 PFDBI 想清楚“讲什么”，用车型参考图提供视觉证据，再用博主 Style DNA 决定“怎么说”。
+汽车设计文案助手。面向汽车设计与审美内容团队的 Electron 桌面工具：在工作台一篇篇写稿，用选题、视觉素材和人眼 PFDBI 把“讲什么”想清楚，再自己写初稿并按口播时长核对字数。
 
 ## 功能
 
-- 导入博主历史文案，提取 Style DNA、结构模板、few-shot
-- 上传车型参考图，视觉观察与矩形标注
-- PFDBI 五维设计评价（事实 / 推断 / 偏好分离）
-- Base Draft → 模板匹配 → Style Adapter → 质量检查
-- 成稿编辑、局部重写、版本、导出 TXT/MD
+- 工作台项目：选题想法、视觉素材、设计分析、初稿文案四个纵向步骤
+- 上传车型参考图，标记主分析 / 其他车型、车型标签和比较说明
+- 双图对照预览（缩放、拖移），按 PFDBI 五维手写设计观察
+- 初稿正文 + 标题 / 内容类型 / 预期时长；按每分钟 250 字检查字数
+- 项目级事实补充（参数、发布会表述、报道、设计历史）
 - 无 API Key 时 Demo Mode（MockLLM + DEMO DATA）
 
 ## 推荐工作流
 
-1. 在风格库填写创作者信息，直接选择历史文案文件夹并提取 Style DNA。
-2. 新建选题，进入工作台后上传参考图，按主分析车型 / 其他车型分类，并在比较说明中写清关系。
-3. 预览图片并拖拽添加矩形标注，说明需要重点分析的设计区域。
-4. 依次运行视觉观察和 PFDBI 评价；PFDBI 完成前不会开放成稿生成。
-5. 配置平台、内容类型、时长、风格和初步草稿，生成并编辑最终稿。
+需求变更以 [docs/ChangeLog.md](docs/ChangeLog.md) 为准，现行规格见 [docs/prd.md](docs/prd.md)。
 
-详细的状态机、比较模型和验收标准见
-[创作链路与交互重构 PRD V2](docs/prd_workflow-v2.md)。
+**文案创作**：选题想法 → 视觉素材 → 对照看图写 PFDBI → 写初稿并核对字数。多写几篇，就是自己的文案风格积累。产品不再单独维护风格库。
+
+文档目录说明见 [docs/README.md](docs/README.md)。旧的风格配置双链路与 V2 串行工作台已归档。
 
 ## 安装
 
@@ -33,7 +30,7 @@ npm install
 ```env
 SILICONFLOW_API_KEY=你的密钥
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-SILICONFLOW_TEXT_MODEL=deepseek-ai/DeepSeek-V4-Flash
+SILICONFLOW_TEXT_MODEL=Qwen/Qwen3.5-27B
 SILICONFLOW_VISION_MODEL=Qwen/Qwen3-VL-32B-Instruct
 ```
 

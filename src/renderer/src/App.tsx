@@ -4,13 +4,10 @@ import { HomePage } from './pages/HomePage'
 import { ProjectNewPage } from './pages/ProjectNewPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { StyleDetailPage } from './pages/StyleDetailPage'
-import { StyleNewPage } from './pages/StyleNewPage'
-import { StylesPage } from './pages/StylesPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 
 /**
- * 渲染进程路由。
+ * 渲染进程路由。风格库入口已下线。
  */
 function App(): React.JSX.Element {
   return (
@@ -21,9 +18,7 @@ function App(): React.JSX.Element {
           <Route path="/workbench" element={<ProjectsPage />} />
           <Route path="/workbench/new" element={<ProjectNewPage />} />
           <Route path="/workbench/:id" element={<WorkbenchPage />} />
-          <Route path="/styles" element={<StylesPage />} />
-          <Route path="/styles/new" element={<StyleNewPage />} />
-          <Route path="/styles/:id" element={<StyleDetailPage />} />
+          <Route path="/styles/*" element={<Navigate to="/workbench" replace />} />
           <Route path="/projects" element={<Navigate to="/workbench" replace />} />
           <Route path="/projects/new" element={<Navigate to="/workbench/new" replace />} />
           <Route path="/projects/:id" element={<LegacyProjectRedirect />} />

@@ -84,13 +84,17 @@ export function pfdbiAnalysisPrompt(input: {
 }): { system: string; user: string } {
   return {
     system: `你是汽车设计评价分析师。评价框架如下，必须遵守，不得把个人偏好写成客观结论。某维证据不足时 applicable=false，并写“暂无足够证据”，禁止硬凑。\n${frameworkPromptBlock()}\n图片 role=primary 是主分析车型，允许 0 张或多张；role=other 是其他车型，它与主分析车型的关系以 comparisonNote 为准，不要自行套用同系不同代或同代不同系。没有 other 图片时 peerComparisons 必须为空。用户填写的车型标签未经外部验证，不得自动升级为事实。比较输出 peerComparisons，每项含 subjects/relation/observations/differences/evidence。输出 PFDBIAnalysis JSON。${JSON_ONLY}`,
-    user: `选题：${input.topic}\n用户草稿：${input.draft}\n按角色组织的视觉证据：${input.vision}\n补充资料：${input.extras}\n请区分 facts / inferences / personalPreferences，并保证比较结论可追溯到图片观察。`
+    user: `选题：${input.topic}\n用户草稿：${input.draft}\n按角色组织的视觉证据：${input.vision}\n补充资料：${input.extras}\n请区分 facts / inferences / personalPreferences，并保证比较结论可追溯到图片观察。没有参考图时不得编造看见的型面、灯组或比例，必须声明证据不足。`
   }
 }
 
+/**
+ * 生成中性 Base Draft：用选题、初步想法、事实补充和 PFDBI，不模仿任何博主。
+ */
 export function baseDraftPrompt(input: {
   topic: string
   draft: string
+  facts: string
   durationSeconds: number
   platform: string
   pfdbi: string
@@ -98,14 +102,15 @@ export function baseDraftPrompt(input: {
 }): { system: string; user: string } {
   const words = Math.round((input.durationSeconds / 60) * input.wordsPerMinute)
   return {
-    system: `你在写 Base Draft：先把汽车设计逻辑写清楚，不要模仿任何博主。必须包含 outline、script、pfdbiReferences。事实/推断/偏好分开。视觉证据不足处写待核实。目标约 ${words} 字。${JSON_ONLY}`,
-    user: `选题：${input.topic}\n用户初步草稿：${input.draft || '无'}\n平台：${input.platform}\n目标时长：${input.durationSeconds} 秒\nPFDBI：${input.pfdbi}`
+    system: `你在写 Base Draft：先把汽车设计逻辑写清楚，不要模仿任何博主。必须包含 outline、script、pfdbiReferences。事实/推断/偏好分开。视觉证据不足处写待核实。用户提供的「事实补充」只是素材：其中的数字、配置和原话采用时不得改写得更漂亮；未出现的参数禁止写成已确认事实。事实补充与画面观察冲突时，画面只描述看见的设计，参数以事实补充为准并写明来自用户粘贴。目标约 ${words} 字。${JSON_ONLY}`,
+    user: `选题：${input.topic}\n用户初步想法：${input.draft || '无'}\n事实补充（用户粘贴，未经系统核实）：\n${input.facts || '无'}\n平台：${input.platform}\n目标时长：${input.durationSeconds} 秒\nPFDBI：${input.pfdbi}`
   }
 }
 
 const DOCUMENT_ANALYSIS_JSON_CONTRACT = `{
   "documentId": "必须原样返回用户提供的 documentId",
   "topic": "这篇文案在讨论什么",
+  "contentType": "车型解读 / 设计知识 / 设计观点 / 设计回顾 / 新车热点 / 设计跨界，只选一个，作为预览卡标签",
   "structure": ["结构步骤"],
   "languageTraits": ["语言特点"],
   "argumentationTraits": ["论证特点"],
@@ -114,7 +119,7 @@ const DOCUMENT_ANALYSIS_JSON_CONTRACT = `{
 }`
 
 const STYLE_PROFILE_JSON_CONTRACT = `{
-  "creator": { "name": "创作者", "platform": "平台", "description": "人设描述" },
+  "creator": { "name": "创作者", "platform": "平台", "description": "人设描述", "notes": "不超过20字的风格简介" },
   "tone": {
     "professionalism": 0.5,
     "emotion": 0.5,
@@ -207,9 +212,9 @@ export function styleAggregationRepairInstruction(): string {
 
 const STYLE_SLICE_CONTRACTS: Record<string, { focus: string; contract: string }> = {
   tone: {
-    focus: '只归纳创作者人设和语气六维分数',
+    focus: '归纳创作者人设、语气六维分数，以及不超过20字的风格简介 notes（给卡片展示和后续工作台选卡用，不要写成完整人设）',
     contract: `{
-  "creator": { "name": "创作者", "platform": "平台", "description": "人设描述" },
+  "creator": { "name": "创作者", "platform": "平台", "description": "人设描述", "notes": "口语讲灯组细节" },
   "tone": {
     "professionalism": 0.5,
     "emotion": 0.5,
@@ -316,9 +321,9 @@ export function styleSliceRepairInstruction(slice: keyof typeof STYLE_SLICE_CONT
 }
 
 const SINGLE_TEMPLATE_JSON_CONTRACT = `{
-  "templateName": "体现内容类型的中文名称",
-  "scenario": "这个模板适合什么选题",
-  "applicableTopics": ["内容类型"],
+  "templateName": "概括这篇口播怎么组织，不要写成内容类型标签",
+  "scenario": "这个分段方式适合怎样的口播",
+  "applicableTopics": [],
   "durationRange": "4-8 分钟",
   "sections": [
     {
@@ -343,27 +348,23 @@ const EXAMPLE_BUNDLE_JSON_CONTRACT = `{
 }`
 
 /**
- * 只生成某一个内容类型的结构模板，避免一次吐出 6 份重复骨架。
+ * 从样本文案的实际分段抽出 1 个结构模板，不按内容类型拆多份。
  */
-export function templateOnePrompt(input: {
-  contentType: string
-  profile: string
-  analyses: string
-}): {
+export function templateOnePrompt(input: { profile: string; analyses: string }): {
   system: string
   user: string
 } {
   return {
-    system: `基于 Style DNA 生成 1 个场景化结构模板，只服务内容类型「${input.contentType}」。禁止输出其他类型，禁止 templates 数组，禁止“未命名模板/未命名段落”。templateName 必须包含「${input.contentType}」。sections 4 到 8 段，name/purpose/instruction 都要是具体中文。timePercent 为 0 到 1，之和接近 1。必须输出：\n${SINGLE_TEMPLATE_JSON_CONTRACT}\n${JSON_ONLY}`,
-    user: `内容类型：${input.contentType}\nStyle DNA 摘要：${input.profile}\n单篇结构线索：${input.analyses}`
+    system: `根据样本文案实际怎么分段，抽出 1 个结构模板。不要按内容类型分类，不要生成多份模板，禁止 templates 数组，禁止“未命名模板/未命名段落”。templateName 只概括组织方式，例如「类比引入后拆设计元素」，禁止写成车型解读/设计知识/设计观点等标签。applicableTopics 输出空数组。sections 4 到 8 段，name/purpose/instruction 都要是具体中文。timePercent 为 0 到 1，之和接近 1。必须输出：\n${SINGLE_TEMPLATE_JSON_CONTRACT}\n${JSON_ONLY}`,
+    user: `Style DNA 摘要：${input.profile}\n单篇结构线索：${input.analyses}`
   }
 }
 
 /**
  * 为单份结构模板的 JSON 修复步骤提供字段契约。
  */
-export function templateOneRepairInstruction(contentType: string): string {
-  return `把原响应转换成单个模板 JSON，不要数组。templateName 必须体现「${contentType}」：\n${SINGLE_TEMPLATE_JSON_CONTRACT}`
+export function templateOneRepairInstruction(): string {
+  return `把原响应转换成单个模板 JSON，不要数组。templateName 不要写成内容类型标签：\n${SINGLE_TEMPLATE_JSON_CONTRACT}`
 }
 
 /**
@@ -407,6 +408,34 @@ export function templateMatchPrompt(input: {
   return {
     system: `根据选题匹配最合适的 Structure Template。输出 { templateName, reason }。${JSON_ONLY}`,
     user: `选题：${input.topic}\n类型：${input.contentType}\n模板：${input.templates}`
+  }
+}
+
+/**
+ * 从已入库风格卡目录中选一张，或明确改用中性结构。
+ */
+export function styleSelectPrompt(input: {
+  topic: string
+  draft: string
+  facts: string
+  contentType: string
+  pfdbi: string
+  catalog: string
+}): { system: string; user: string } {
+  return {
+    system: `你是汽车设计文案的风格调度。只能从已入库风格卡目录里挑一张，或明确没有合适卡。
+规则：
+1. styleId 必须是目录中的 id；都不合适时 styleId 输出空字符串。
+2. 优先根据每张卡的 notes（20字以内风格简介）判断适不适合本期选题和内容类型，再结合平台。
+3. 不得选用目录以外的风格，不得编造风格卡。
+4. reason 用一两句中文说明为什么选这张，或为什么改用中性结构。
+输出 JSON：{ "styleId": "", "reason": "" }。${JSON_ONLY}`,
+    user: `选题：${input.topic}
+内容类型：${input.contentType}
+初步想法：${input.draft || '（空）'}
+事实补充摘录：${input.facts || '（空）'}
+PFDBI 核心：${input.pfdbi}
+已入库风格卡目录：${input.catalog}`
   }
 }
 

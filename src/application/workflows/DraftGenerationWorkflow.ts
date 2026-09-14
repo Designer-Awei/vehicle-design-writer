@@ -11,6 +11,7 @@ import {
   RewriteSchema,
   ScriptSchema,
   TemplateMatchSchema,
+  StyleSelectSchema,
   VisionObservationSchema,
   type CommercialBrief,
   type DurationProfile,
@@ -18,15 +19,17 @@ import {
   type PlatformProfile,
   type QualityReport,
   type ScriptDraft,
-  type TemplateMatch
+  type TemplateMatch,
+  type PFDBIAnalysis
 } from '@schemas/index'
-import { PROMPT_VERSION } from '@shared/constants'
-import type { WorkflowProgress } from '@shared/ipc'
+import { FACTS_PROMPT_LIMIT, PROMPT_VERSION } from '@shared/constants'
+import type { ProjectRecord, WorkflowProgress } from '@shared/ipc'
 import {
   baseDraftPrompt,
   pfdbiAnalysisPrompt,
   scriptQualityPrompt,
   styleAdapterPrompt,
+  styleSelectPrompt,
   templateMatchPrompt,
   visionObservationRepairInstruction,
   visionObservationPrompt,
@@ -114,28 +117,28 @@ export async function runVisionAnalysis(projectId: string, ctx: DraftContext): P
 }
 
 /**
- * 在全部图片完成视觉观察后生成主体评价，以及与其他车型的比较。
+ * 无参考图时仍可生成 PFDBI，但必须声明证据不足，不得编造看见的型面。
  */
 export async function runPfdbiAnalysis(projectId: string, ctx: DraftContext): Promise<void> {
   const project = ctx.repos.getProject(projectId)
   if (!project) throw new Error('项目不存在')
   const images = ctx.repos.listImages(projectId)
-  if (images.length === 0) {
-    throw new Error('请先上传至少一张参考图')
-  }
   const observations = ctx.repos.listVision(projectId)
   const observedIds = new Set(observations.map((item) => item.imageId))
-  if (images.some((image) => !observedIds.has(image.id))) {
+  if (images.length > 0 && images.some((image) => !observedIds.has(image.id))) {
     throw new Error('请先完成全部参考图的视觉观察')
   }
   const textModel = ctx.router.select('json')
-  const evidence = images.map((image) => ({
-    imageId: image.id,
-    role: image.role,
-    vehicleLabel: image.vehicleLabel || '未填写车型标签',
-    comparisonNote: image.comparisonNote,
-    observation: observations.find((item) => item.imageId === image.id)
-  }))
+  const evidence =
+    images.length === 0
+      ? []
+      : images.map((image) => ({
+          imageId: image.id,
+          role: image.role,
+          vehicleLabel: image.vehicleLabel || '未填写车型标签',
+          comparisonNote: image.comparisonNote,
+          observation: observations.find((item) => item.imageId === image.id)
+        }))
   ctx.onProgress?.({ projectId, stage: 'pfdbi', message: 'PFDBI 设计评价分析', percent: 20 })
   const pfdbiKey = hashText(
     `${project.topic}|${JSON.stringify(evidence)}|${textModel}|${PROMPT_VERSION}`
@@ -145,8 +148,14 @@ export async function runPfdbiAnalysis(projectId: string, ctx: DraftContext): Pr
     const prompt = pfdbiAnalysisPrompt({
       topic: project.topic,
       draft: '',
-      vision: JSON.stringify(evidence),
-      extras: JSON.stringify(project.commercial)
+      vision:
+        images.length === 0
+          ? '没有参考图和视觉观察。不得编造看见的型面、灯组、比例。必须声明证据不足。'
+          : JSON.stringify(evidence),
+      extras: JSON.stringify({
+        commercial: project.commercial,
+        facts: project.facts
+      })
     })
     const response = await ctx.provider.chat(
       {
@@ -185,6 +194,7 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
   const basePrompt = baseDraftPrompt({
     topic: project.topic,
     draft: project.draft,
+    facts: project.facts.slice(0, FACTS_PROMPT_LIMIT),
     durationSeconds: project.durationSeconds,
     platform: project.platform,
     pfdbi: JSON.stringify(pfdbi),
@@ -207,19 +217,22 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
   ctx.repos.saveScript(projectId, 'base', baseDraft)
   ctx.repos.addVersion(projectId, 'V Base Draft', baseDraft.script)
 
-  const styleId = project.styleId
-  const templates = styleId ? ctx.repos.listTemplates(styleId) : []
-  const profile = styleId ? ctx.repos.getStyleProfile(styleId) : null
-  const examples = styleId ? ctx.repos.listExamples(styleId) : []
+  report('style_select', '选择风格卡', 32)
+  const selected = await selectStyleCard(project, pfdbi, ctx, textModel)
+  const templates = selected.styleId ? ctx.repos.listTemplates(selected.styleId) : []
+  const profile = selected.styleId ? ctx.repos.getStyleProfile(selected.styleId) : null
+  const examples = selected.styleId ? ctx.repos.listExamples(selected.styleId) : []
   const platforms = ctx.repos.listPlatforms()
   const platform = platforms.find((item) => item.platform === project.platform)
 
-  report('template', '匹配结构模板', 42)
+  report('template', '读取结构模板', 42)
   let match: TemplateMatch = {
     templateName: templates[0]?.templateName ?? '默认线性结构',
-    reason: '未找到风格模板，使用默认顺序。'
+    reason: selected.reason,
+    styleId: selected.styleId,
+    styleName: selected.styleName
   }
-  if (templates.length > 0) {
+  if (templates.length > 1) {
     const prompt = templateMatchPrompt({
       topic: project.topic,
       contentType: project.contentType,
@@ -249,7 +262,18 @@ export async function runDraftGeneration(projectId: string, ctx: DraftContext): 
       model: matchRes.model,
       ...usageOf(matchRes)
     })
-    match = await parseModelJson(matchRes.text, TemplateMatchSchema, ctx.provider, textModel)
+    const templateMatch = await parseModelJson(
+      matchRes.text,
+      TemplateMatchSchema,
+      ctx.provider,
+      textModel
+    )
+    match = {
+      templateName: templateMatch.templateName,
+      reason: `${selected.reason} ${templateMatch.reason}`.trim(),
+      styleId: selected.styleId,
+      styleName: selected.styleName
+    }
   }
   ctx.repos.saveScript(projectId, 'match', match)
   const selectedTemplate =
@@ -355,6 +379,80 @@ function formatAnnotations(annotations: ImageAnnotation[]): string {
       (item) => `rect x=${item.x} y=${item.y} w=${item.width} h=${item.height} note=${item.note}`
     )
     .join('\n')
+}
+
+/**
+ * 人手选风格卡视为覆盖；未指定时由 Agent 从已入库目录挑选，未入库预览卡不会出现。
+ */
+async function selectStyleCard(
+  project: ProjectRecord,
+  pfdbi: PFDBIAnalysis,
+  ctx: DraftContext,
+  textModel: string
+): Promise<{ styleId: string | null; styleName: string; reason: string }> {
+  const catalog = ctx.repos.listCatalogStyles()
+  if (project.styleId) {
+    const override = catalog.find((item) => item.id === project.styleId)
+    if (override) {
+      return {
+        styleId: override.id,
+        styleName: override.name,
+        reason: `作者指定覆盖风格卡「${override.name}」。`
+      }
+    }
+    return {
+      styleId: null,
+      styleName: '中性结构',
+      reason: '作者指定的风格卡尚未入库或没有 Style DNA，改用中性结构。'
+    }
+  }
+  if (catalog.length === 0) {
+    return {
+      styleId: null,
+      styleName: '中性结构',
+      reason: '风格库还没有已入库风格卡，使用中性结构。'
+    }
+  }
+  const prompt = styleSelectPrompt({
+    topic: project.topic,
+    draft: project.draft,
+    facts: project.facts.slice(0, FACTS_PROMPT_LIMIT),
+    contentType: project.contentType,
+    pfdbi: pfdbi.coreConclusion,
+    catalog: JSON.stringify(catalog)
+  })
+  const response = await ctx.provider.chat(
+    {
+      task: 'style_select',
+      capability: 'json',
+      json: true,
+      messages: [
+        { role: 'system', content: prompt.system },
+        { role: 'user', content: prompt.user }
+      ]
+    },
+    textModel
+  )
+  ctx.repos.addUsage({
+    projectId: project.id,
+    task: 'style_select',
+    model: response.model,
+    ...usageOf(response)
+  })
+  const picked = await parseModelJson(response.text, StyleSelectSchema, ctx.provider, textModel)
+  const hit = catalog.find((item) => item.id === picked.styleId)
+  if (!hit) {
+    return {
+      styleId: null,
+      styleName: '中性结构',
+      reason: picked.reason || '没有合适的已入库风格卡，使用中性结构。'
+    }
+  }
+  return {
+    styleId: hit.id,
+    styleName: hit.name,
+    reason: picked.reason || `选题与「${hit.name}」更接近。`
+  }
 }
 
 function usageOf(response: {

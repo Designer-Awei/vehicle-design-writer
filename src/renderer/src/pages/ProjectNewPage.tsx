@@ -5,7 +5,7 @@ import { useWorkspaceBar } from '@renderer/workspace/WorkspaceContext'
 import { CONTENT_TYPES } from '@shared/constants'
 
 /**
- * 新建选题骨架；图片、PFDBI 和成稿参数在工作台内按顺序完成。
+ * 新建选题骨架，创建后进入项目内的选题想法页。
  */
 export function ProjectNewPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -18,7 +18,7 @@ export function ProjectNewPage(): React.JSX.Element {
   })
 
   /**
-   * 创建项目骨架并从“参考图与标注”开始。
+   * 创建项目并进入工作台。
    */
   async function create(): Promise<void> {
     if (!topic.trim()) return
@@ -42,11 +42,10 @@ export function ProjectNewPage(): React.JSX.Element {
   return (
     <div className="page-fill items-center pt-12">
       <section className="w-full max-w-3xl rounded-2xl border border-[#2a241e] bg-[#161310] p-7">
-        <div className="text-xs tracking-[0.18em] text-[#c4a574]">STEP 0 · 创建选题</div>
+        <div className="text-xs tracking-[0.18em] text-[#c4a574]">新建文案</div>
         <h2 className="mt-2 text-2xl font-semibold">先定义要回答的问题</h2>
         <p className="mt-2 text-sm leading-6 text-[#9a8f82]">
-          创建后先上传并标注参考图。平台、时长、风格和初步草稿将在 PFDBI
-          评价完成后配置，避免表达参数干扰视觉判断。
+          创建后在工作台里补视觉素材、写设计分析和初稿。
         </p>
         <label className="mt-6 block text-sm text-[#cfc3b5]" htmlFor="topic">
           选题 / 核心问题
@@ -62,7 +61,7 @@ export function ProjectNewPage(): React.JSX.Element {
           disabled={busy || !topic.trim()}
           onClick={() => void create()}
         >
-          {busy ? '正在创建…' : '创建并上传参考图'}
+          {busy ? '正在创建…' : '创建并进入工作台'}
         </button>
       </section>
     </div>

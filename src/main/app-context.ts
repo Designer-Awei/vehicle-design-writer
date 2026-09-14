@@ -9,7 +9,7 @@ import { MockLLMProvider } from '@infrastructure/llm/MockLLMProvider'
 import { SiliconFlowProvider } from '@infrastructure/llm/SiliconFlowProvider'
 import type { LLMProvider } from '@infrastructure/llm/types'
 import { decryptSecret, encryptSecret } from '@infrastructure/security/secret-store'
-import { DEFAULT_BASE_URL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL } from '@shared/constants'
+import { DEFAULT_BASE_URL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL, LEGACY_DEFAULT_TEXT_MODEL } from '@shared/constants'
 
 export interface AppContext {
   db: AppDatabase
@@ -42,10 +42,14 @@ export function hydrateSettingsFromEnv(repos: Repositories): void {
   } else if (!repos.getSetting('base_url')) {
     repos.setSetting('base_url', DEFAULT_BASE_URL)
   }
-  if (process.env.SILICONFLOW_TEXT_MODEL) {
-    repos.setSetting('text_model', process.env.SILICONFLOW_TEXT_MODEL)
-  } else if (!repos.getSetting('text_model')) {
-    repos.setSetting('text_model', DEFAULT_TEXT_MODEL)
+  const envText = process.env.SILICONFLOW_TEXT_MODEL?.trim()
+  if (envText && envText !== LEGACY_DEFAULT_TEXT_MODEL) {
+    repos.setSetting('text_model', envText)
+  } else {
+    const current = repos.getSetting('text_model')
+    if (!current || current === LEGACY_DEFAULT_TEXT_MODEL) {
+      repos.setSetting('text_model', DEFAULT_TEXT_MODEL)
+    }
   }
   if (process.env.SILICONFLOW_VISION_MODEL) {
     repos.setSetting('vision_model', process.env.SILICONFLOW_VISION_MODEL)

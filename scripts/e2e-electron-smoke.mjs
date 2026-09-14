@@ -63,7 +63,6 @@ async function waitFor(expression, timeoutMs = 5000) {
 }
 
 let projectId
-let styleId
 try {
   const shell = await evaluate(`({
     title: document.title,
@@ -74,37 +73,11 @@ try {
   assert.equal(shell.background, 'rgb(12, 11, 10)')
   assert.equal(shell.topPadding, '32px')
 
-  await evaluate(`location.hash = '#/styles/new'`)
-  await waitFor(`document.body.textContent.includes('选择文案文件夹并继续')`)
-  assert.equal(await evaluate(`document.body.textContent.includes('保存档案')`), false)
-
-  styleId = await evaluate(`window.api.styles.create({
-    name: 'E2E 待删除风格',
-    platform: 'B站',
-    category: '设计观点',
-    notes: '验证删除入口'
-  }).then(style => style.id)`)
-  const updatedStyle = await evaluate(`window.api.styles.update('${styleId}', {
-    category: '车型解读',
-    notes: '已切换内容类型'
-  })`)
-  assert.equal(updatedStyle.category, '车型解读')
-  await evaluate(`location.hash = '#/styles'`)
-  await waitFor(`document.body.textContent.includes('E2E 待删除风格')`)
-  await waitFor(`([...document.querySelectorAll('.style-list-card')].some(node =>
-    node.textContent.includes('E2E 待删除风格') && node.textContent.includes('车型解读')
-  ))`)
-  await evaluate(`(() => {
-    const card = [...document.querySelectorAll('.style-list-card')]
-      .find(node => node.textContent.includes('E2E 待删除风格'))
-    card.querySelector('.style-delete-button').click()
-    return true
-  })()`)
-  await waitFor(`Boolean(document.querySelector('.confirm-dialog .danger-button'))`)
-  await evaluate(`document.querySelector('.confirm-dialog .danger-button').click(); true`)
-  await waitFor(`!document.body.textContent.includes('E2E 待删除风格')`)
-  assert.equal(await evaluate(`window.api.styles.get('${styleId}')`), null)
-  styleId = undefined
+  await evaluate(`location.hash = '#/workbench'`)
+  await waitFor(
+    `document.body.textContent.includes('已有项目') || document.body.textContent.includes('还没有项目')`
+  )
+  assert.equal(await evaluate(`document.body.textContent.includes('风格库')`), false)
 
   projectId = await evaluate(`window.api.projects.create({
     topic: '端到端测试：主分析车型与对标车型的设计差异',
@@ -118,116 +91,80 @@ try {
   assert.match(projectId, /^proj_/)
 
   await evaluate(`location.hash = '#/workbench/${projectId}'`)
+  await waitFor(`document.body.textContent.includes('选题想法')`)
+  const tabs = await evaluate(
+    `[...document.querySelectorAll('.workbench-rail button')].map((node) => node.textContent.trim())`
+  )
+  assert.deepEqual(tabs, ['选题想法', '视觉素材', '设计分析', '初稿文案'])
+
+  await evaluate(
+    `[...document.querySelectorAll('.workbench-rail button')].find((node) => node.textContent.includes('视觉素材')).click(); true`
+  )
   await waitFor(`Boolean(document.querySelector('.image-evidence-card'))`)
 
-  const gates = await evaluate(`[...document.querySelectorAll('.workspace-stage')].map(node => ({
-    label: node.textContent.trim(),
-    disabled: node.disabled === true
-  }))`)
-  assert.equal(gates.find((item) => item.label.includes('PFDBI'))?.disabled, true)
-  assert.equal(gates.find((item) => item.label.includes('成稿设置'))?.disabled, true)
-  assert.equal(gates.find((item) => item.label.includes('文案编辑'))?.disabled, true)
-
-  await evaluate(`document.querySelector('.image-evidence-actions .btn-ghost').click(); true`)
-  await waitFor(`Boolean(document.querySelector('.annotation-draw-layer'))`)
-  const rect = await evaluate(`(() => {
-    const value = document.querySelector('.annotation-draw-layer').getBoundingClientRect()
-    return { x: value.x, y: value.y, width: value.width, height: value.height }
-  })()`)
-  await send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: rect.x + rect.width * 0.2,
-    y: rect.y + rect.height * 0.2,
-    button: 'left',
-    clickCount: 1
-  })
-  await send('Input.dispatchMouseEvent', {
-    type: 'mouseMoved',
-    x: rect.x + rect.width * 0.6,
-    y: rect.y + rect.height * 0.55,
-    button: 'left',
-    buttons: 1
-  })
-  await send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: rect.x + rect.width * 0.6,
-    y: rect.y + rect.height * 0.55,
-    button: 'left',
-    clickCount: 1
-  })
-  await waitFor(`document.querySelector('.annotation-sidebar .btn-primary')?.disabled === false`)
-  await evaluate(`document.querySelector('.annotation-sidebar .btn-primary').click(); true`)
-  await waitFor(`document.querySelectorAll('.annotation-list-item').length === 1`)
-  assert.equal(await evaluate(`document.querySelector('#annotation-note').value`), '')
-
-  const annotation = await evaluate(
-    `window.api.projects.get('${projectId}').then(project => project.images[0].annotations[0])`
+  await evaluate(
+    `[...document.querySelectorAll('.workbench-rail button')].find((node) => node.textContent.includes('设计分析')).click(); true`
   )
-  assert.ok(annotation.width > 0.35 && annotation.width < 0.45)
-  assert.ok(annotation.height > 0.3 && annotation.height < 0.4)
+  await waitFor(`document.body.textContent.includes('P 比例姿态')`)
 
-  await evaluate(`document.querySelector('.annotation-close').click(); true`)
-  await waitFor(`!document.querySelector('.annotation-overlay')`)
-  await evaluate(`document.querySelector('.icon-danger-button').click(); true`)
-  await waitFor(`Boolean(document.querySelector('#delete-reference-image-title'))`)
-  assert.equal(
-    await evaluate(
-      `window.api.projects.get('${projectId}').then(project => project.images.length)`
-    ),
-    1
+  await evaluate(
+    `[...document.querySelectorAll('.workbench-rail button')].find((node) => node.textContent.includes('初稿文案')).click(); true`
   )
-  await evaluate(`document.querySelector('.confirm-dialog .btn-secondary').click(); true`)
-  await waitFor(`!document.querySelector('#delete-reference-image-title')`)
+  await waitFor(`document.body.textContent.includes('预期时长')`)
+  assert.equal(await evaluate(`document.body.textContent.includes('预览并添加矩形标注')`), false)
 
-  const afterVision = await evaluate(`window.api.projects.analyzeVision('${projectId}')`)
-  assert.equal(afterVision.visionObservations.length, 1)
+  await evaluate(
+    `[...document.querySelectorAll('.workbench-rail button')].find((node) => node.textContent.includes('视觉素材')).click(); true`
+  )
+  await waitFor(`Boolean(document.querySelector('.image-evidence-card'))`)
+  assert.equal(await evaluate(`Boolean(document.querySelector('.annotation-draw-layer'))`), false)
 
-  const afterPfdbi = await evaluate(`window.api.projects.analyzePfdbi('${projectId}')`)
-  assert.ok(afterPfdbi.pfdbi?.coreConclusion)
+  const saved = await evaluate(`window.api.projects.savePfdbi('${projectId}', {
+    topic: '端到端测试：主分析车型与对标车型的设计差异',
+    coreQuestion: '主分析车型和对标车型差在哪',
+    targetAudience: '',
+    P: { observations: ['姿态更低'], evidence: [], interpretation: '', aestheticEffect: '', judgement: '姿态更低', applicable: true },
+    F: { observations: [], evidence: [], interpretation: '', aestheticEffect: '', judgement: '', applicable: false },
+    D: { observations: [], evidence: [], interpretation: '', aestheticEffect: '', judgement: '', applicable: false },
+    B: { observations: [], evidence: [], interpretation: '', aestheticEffect: '', judgement: '', applicable: false },
+    I: { observations: [], evidence: [], interpretation: '', aestheticEffect: '', judgement: '', applicable: false },
+    aestheticKeywords: [],
+    comparisons: [],
+    peerComparisons: [],
+    verticalComparisons: [],
+    horizontalComparisons: [],
+    counterArguments: [],
+    facts: [],
+    inferences: [],
+    personalPreferences: [],
+    coreConclusion: '姿态更低',
+    contentOutline: []
+  }).then((project) => project.pfdbi?.P?.judgement)`)
+  assert.equal(saved, '姿态更低')
 
-  await evaluate(`window.api.projects.update('${projectId}', {
-    draft: '先讲视觉证据，再形成设计判断。',
-    platform: 'B站',
-    durationSeconds: 300,
+  const afterDraft = await evaluate(`window.api.projects.update('${projectId}', {
+    title: '端到端测试标题',
     contentType: '车型解读',
-    styleId: null
+    durationSeconds: 180,
+    finalScript: '这是一篇用来核对字数的初稿正文。'
   })`)
-  const generated = await evaluate(`window.api.projects.generate('${projectId}')`)
-  assert.ok(generated.baseDraft?.script)
-  assert.ok(generated.finalDraft?.script)
-  assert.ok(generated.quality)
-
-  const imageId = generated.images[0].id
-  await evaluate(`window.api.projects.saveAnnotation({
-    imageId: '${imageId}',
-    x: 0.1,
-    y: 0.1,
-    width: 0.2,
-    height: 0.2,
-    note: '验证下游失效'
-  })`)
-  const invalidated = await evaluate(`window.api.projects.get('${projectId}')`)
-  assert.equal(invalidated.visionObservations.length, 0)
-  assert.equal(invalidated.pfdbi, null)
-  assert.equal(invalidated.finalDraft, null)
+  assert.equal(afterDraft.title, '端到端测试标题')
+  assert.equal(afterDraft.durationSeconds, 180)
+  assert.ok(afterDraft.finalDraft?.script.includes('核对字数'))
+  assert.ok(afterDraft.pfdbi?.P?.judgement)
 
   console.log(
     JSON.stringify(
       {
         passed: true,
         checks: [
-          '深色窗口内容与 32px 标题栏覆盖区',
-          '风格创建入口无需单独保存档案',
-          '风格列表删除与确认',
-          '阶段门禁',
-          '参考图预览',
-          '拖拽矩形标注与坐标持久化',
-          '保存标注后自动清空意图',
-          '删除参考图二次确认',
-          '视觉观察',
-          'PFDBI',
-          'Base Draft 与最终稿',
-          '标注变化触发下游失效'
+          '侧栏不再出现风格库',
+          '项目内纵向四标签',
+          '视觉素材卡且无框选标注',
+          '设计分析 PFDBI 标签',
+          '初稿时长检查',
+          '人写 PFDBI 可保存',
+          '保存初稿不丢 PFDBI'
         ]
       },
       null,
@@ -237,9 +174,6 @@ try {
 } finally {
   if (projectId) {
     await evaluate(`window.api.projects.remove('${projectId}')`).catch(() => undefined)
-  }
-  if (styleId) {
-    await evaluate(`window.api.styles.remove('${styleId}')`).catch(() => undefined)
   }
   socket.close()
 }

@@ -1,6 +1,8 @@
+import { deriveStyleNotes } from '@application/style-preview'
 import { createId, nowIso } from '@domain/ids'
 import {
   coerceImageRole,
+  PFDBIAnalysisSchema,
   type CommercialBrief,
   type DurationProfile,
   type ExampleCase,
@@ -19,6 +21,9 @@ import type {
   ReferenceImageRecord,
   ScriptVersionRecord,
   StyleDocumentRecord,
+  StyleIngestJob,
+  StyleIngestJobStatus,
+  StylePreviewCard,
   StyleRecord,
   TokenUsageItem
 } from '@shared/ipc'
@@ -48,6 +53,7 @@ interface ProjectRow {
   status: string
   created_at: string
   updated_at: string
+  facts: string
 }
 
 const defaultCommercial = (): CommercialBrief => ({
@@ -90,7 +96,8 @@ function mapProject(row: ProjectRow): ProjectRecord {
       : defaultCommercial(),
     status: row.status,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    facts: row.facts ?? ''
   }
 }
 
@@ -113,12 +120,24 @@ export class Repositories {
   }
 
   listStyles(): StyleRecord[] {
-    return this.db.all<StyleRow>('SELECT * FROM styles ORDER BY updated_at DESC').map(mapStyle)
+    return this.db.all<StyleRow>('SELECT * FROM styles ORDER BY updated_at DESC').map((row) =>
+      this.withDerivedNotes(mapStyle(row))
+    )
   }
 
   getStyle(id: string): StyleRecord | undefined {
     const row = this.db.get<StyleRow>('SELECT * FROM styles WHERE id = ?', [id])
-    return row ? mapStyle(row) : undefined
+    return row ? this.withDerivedNotes(mapStyle(row)) : undefined
+  }
+
+  /**
+   * 旧卡没有入库简介时，从 Style DNA 现抽一句，避免列表和工作台对不上。
+   */
+  private withDerivedNotes(style: StyleRecord): StyleRecord {
+    if (style.notes.trim()) return style
+    const profile = this.getStyleProfile(style.id)
+    if (!profile) return style
+    return { ...style, notes: deriveStyleNotes(profile) }
   }
 
   upsertStyle(
@@ -318,11 +337,12 @@ export class Repositories {
     const commercial = JSON.stringify(input.commercial)
     if (existing) {
       this.db.run(
-        `UPDATE projects SET title=?, topic=?, draft=?, platform=?, duration_seconds=?, content_type=?, style_id=?, commercial_json=?, status=?, updated_at=? WHERE id=?`,
+        `UPDATE projects SET title=?, topic=?, draft=?, facts=?, platform=?, duration_seconds=?, content_type=?, style_id=?, commercial_json=?, status=?, updated_at=? WHERE id=?`,
         [
           input.title,
           input.topic,
           input.draft,
+          input.facts,
           input.platform,
           input.durationSeconds,
           input.contentType,
@@ -335,13 +355,14 @@ export class Repositories {
       )
     } else {
       this.db.run(
-        `INSERT INTO projects(id, title, topic, draft, platform, duration_seconds, content_type, style_id, commercial_json, status, created_at, updated_at)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO projects(id, title, topic, draft, facts, platform, duration_seconds, content_type, style_id, commercial_json, status, created_at, updated_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           input.id,
           input.title,
           input.topic,
           input.draft,
+          input.facts,
           input.platform,
           input.durationSeconds,
           input.contentType,
@@ -599,7 +620,7 @@ export class Repositories {
       'SELECT json FROM pfdbi_analyses WHERE cache_key = ?',
       [cacheKey]
     )
-    return row ? (JSON.parse(row.json) as PFDBIAnalysis) : undefined
+    return row ? parseStoredPfdbi(row.json) ?? undefined : undefined
   }
 
   getPfdbi(projectId: string): PFDBIAnalysis | null {
@@ -607,7 +628,7 @@ export class Repositories {
       'SELECT json FROM pfdbi_analyses WHERE project_id = ?',
       [projectId]
     )
-    return row ? (JSON.parse(row.json) as PFDBIAnalysis) : null
+    return row ? parseStoredPfdbi(row.json) : null
   }
 
   saveScript(projectId: string, kind: 'base' | 'final' | 'quality' | 'match', json: unknown): void {
@@ -760,6 +781,221 @@ export class Repositories {
 
   countStyles(): number {
     return this.db.get<{ c: number }>('SELECT COUNT(*) as c FROM styles')?.c ?? 0
+  }
+
+  /**
+   * 已入库且有 Style DNA 的风格卡，供创作链路选用。未确认的预览卡不会出现。
+   */
+  listCatalogStyles(): Array<{
+    id: string
+    name: string
+    platform: string
+    category: string
+    notes: string
+  }> {
+    return this.listStyles()
+      .map((style) => {
+        const profile = this.getStyleProfile(style.id)
+        if (!profile) return null
+        return {
+          id: style.id,
+          name: style.name,
+          platform: style.platform,
+          category: style.category,
+          notes: style.notes.trim() || deriveStyleNotes(profile)
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => item != null)
+  }
+
+  insertIngestJob(input: {
+    filename: string
+    content: string
+    wordCount: number
+    parseStatus: 'ok' | 'failed'
+    parseError: string | null
+    status: StyleIngestJobStatus
+    error?: string | null
+  }): StyleIngestJob {
+    const id = createId('job')
+    const now = nowIso()
+    this.db.run(
+      `INSERT INTO style_ingest_jobs(
+        id, filename, content, word_count, parse_status, parse_error, status, error,
+        progress_percent, progress_message, preview_json, style_id, created_at, updated_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        id,
+        input.filename,
+        input.content,
+        input.wordCount,
+        input.parseStatus,
+        input.parseError,
+        input.status,
+        input.error ?? input.parseError,
+        input.status === 'failed' ? 100 : 0,
+        input.status === 'failed' ? (input.error ?? input.parseError ?? '解析失败') : '排队中',
+        null,
+        null,
+        now,
+        now
+      ]
+    )
+    return this.getIngestJob(id) as StyleIngestJob
+  }
+
+  listIngestJobs(): StyleIngestJob[] {
+    return this.db
+      .all<IngestJobRow>('SELECT * FROM style_ingest_jobs ORDER BY created_at DESC')
+      .map(mapIngestJob)
+  }
+
+  getIngestJob(id: string): StyleIngestJob | undefined {
+    const row = this.db.get<IngestJobRow>('SELECT * FROM style_ingest_jobs WHERE id = ?', [id])
+    return row ? mapIngestJob(row) : undefined
+  }
+
+  /**
+   * 读取任务正文，仅主进程提取/入库使用，不发给渲染进程。
+   */
+  getIngestJobContent(id: string): string | null {
+    const row = this.db.get<{ content: string }>(
+      'SELECT content FROM style_ingest_jobs WHERE id = ?',
+      [id]
+    )
+    return row?.content ?? null
+  }
+
+  nextQueuedIngestJob(): (StyleIngestJob & { content: string }) | undefined {
+    const row = this.db.get<IngestJobRow>(
+      "SELECT * FROM style_ingest_jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    )
+    if (!row) return undefined
+    return { ...mapIngestJob(row), content: row.content }
+  }
+
+  updateIngestJobStatus(
+    id: string,
+    status: StyleIngestJobStatus,
+    extra: {
+      error?: string | null
+      progressPercent?: number
+      progressMessage?: string
+      preview?: StylePreviewCard | null
+      styleId?: string | null
+    } = {}
+  ): StyleIngestJob | undefined {
+    const current = this.db.get<IngestJobRow>('SELECT * FROM style_ingest_jobs WHERE id = ?', [id])
+    if (!current) return undefined
+    const previewJson =
+      extra.preview === undefined
+        ? current.preview_json
+        : extra.preview
+          ? JSON.stringify(extra.preview)
+          : null
+    this.db.run(
+      `UPDATE style_ingest_jobs SET
+        status=?, error=?, progress_percent=?, progress_message=?, preview_json=?, style_id=?, updated_at=?
+       WHERE id=?`,
+      [
+        status,
+        extra.error === undefined ? current.error : extra.error,
+        extra.progressPercent ?? current.progress_percent,
+        extra.progressMessage ?? current.progress_message,
+        previewJson,
+        extra.styleId === undefined ? current.style_id : extra.styleId,
+        nowIso(),
+        id
+      ]
+    )
+    return this.getIngestJob(id)
+  }
+
+  updateIngestJobProgress(id: string, percent: number, message: string): void {
+    this.db.run(
+      'UPDATE style_ingest_jobs SET progress_percent=?, progress_message=?, updated_at=? WHERE id=?',
+      [percent, message, nowIso(), id]
+    )
+  }
+
+  /**
+   * 进程异常退出时，把卡在「提取中」的任务重新排队。
+   */
+  requeueExtractingJobs(): number {
+    const now = nowIso()
+    this.db.run(
+      `UPDATE style_ingest_jobs
+       SET status='queued', progress_message='排队中（上次中断后恢复）', progress_percent=0, updated_at=?
+       WHERE status='extracting'`,
+      [now]
+    )
+    return this.db.get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM style_ingest_jobs WHERE status='queued'"
+    )?.c ?? 0
+  }
+
+  deleteIngestJob(id: string): void {
+    this.db.run('DELETE FROM style_ingest_jobs WHERE id = ?', [id])
+  }
+}
+
+interface IngestJobRow {
+  id: string
+  filename: string
+  content: string
+  word_count: number
+  parse_status: string
+  parse_error: string | null
+  status: string
+  error: string | null
+  progress_percent: number
+  progress_message: string
+  preview_json: string | null
+  style_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 任务列表不带正文，避免把整篇口播稿推到渲染进程。
+ */
+function mapIngestJob(row: IngestJobRow): StyleIngestJob {
+  return {
+    id: row.id,
+    filename: row.filename,
+    wordCount: row.word_count,
+    status: row.status as StyleIngestJobStatus,
+    error: row.error,
+    progressPercent: row.progress_percent,
+    progressMessage: row.progress_message,
+    preview: hydratePreview(row.preview_json),
+    styleId: row.style_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+/**
+ * 旧预览卡没有 notes 时，从 Style DNA 现抽一句。
+ */
+function hydratePreview(json: string | null): StylePreviewCard | null {
+  if (!json) return null
+  const preview = JSON.parse(json) as StylePreviewCard
+  if (preview.notes?.trim()) return preview
+  if (!preview.profile) return { ...preview, notes: '' }
+  const notes = deriveStyleNotes(preview.profile)
+  return { ...preview, notes, summary: preview.summary || notes }
+}
+
+/**
+ * 读库时用 schema 补齐旧 PFDBI（例如没有 peerComparisons），避免准备上下文直接崩掉。
+ */
+function parseStoredPfdbi(json: string): PFDBIAnalysis | null {
+  try {
+    const parsed = PFDBIAnalysisSchema.safeParse(JSON.parse(json))
+    return parsed.success ? parsed.data : null
+  } catch {
+    return null
   }
 }
 

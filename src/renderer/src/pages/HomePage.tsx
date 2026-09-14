@@ -1,31 +1,31 @@
-import { FileOutput, ImagePlus, ListChecks, Palette, Sparkles } from 'lucide-react'
+import { FileOutput, ImagePlus, ListChecks, PenLine, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useWorkspaceBar } from '@renderer/workspace/WorkspaceContext'
 
 const GUIDE_STEPS = [
   {
-    title: '配置风格模板',
-    description: '导入你认可的历史文案，提取语言特征、结构模板与代表性示例。',
-    icon: Palette
+    title: '创建选题',
+    description: '先写清这期要回答什么，初步想法和事实补充可以后补。',
+    icon: PenLine
   },
   {
-    title: '创建文案并上传参考图',
-    description: '填写选题与初步草稿，上传车型图片，为后续分析提供视觉证据。',
+    title: '准备视觉素材',
+    description: '上传车型图，标主分析车型或其他车型，写上车型标签和比较说明。',
     icon: ImagePlus
   },
   {
-    title: '选择内容参数',
-    description: '设置发布平台、文案类型、预期时长和风格模板，明确生成边界。',
+    title: '对照看图写 PFDBI',
+    description: '在设计分析页双图对照，按 P/F/D/B/I 写下人眼观察。',
     icon: ListChecks
   },
   {
-    title: '运行分析与生成工作流',
-    description: '依次完成视觉观察、PFDBI 设计分析、结构匹配与风格化初稿。',
+    title: '写初稿并核对字数',
+    description: '在初稿页写正文，用标题、内容类型和预期时长做辅助检查。',
     icon: Sparkles
   },
   {
-    title: '编辑、质检并导出',
-    description: '局部改写文案，检查事实风险与时长，保存版本后导出 TXT 或 MD。',
+    title: '改到能发再导出',
+    description: '继续改稿。多写几篇，就是你自己的文案风格积累。',
     icon: FileOutput
   }
 ] as const
@@ -40,16 +40,14 @@ export function HomePage(): React.JSX.Element {
     <div className="guide-page">
       <section className="guide-hero">
         <div className="guide-eyebrow">快速上手</div>
-        <h2>从设计证据到可发布文案</h2>
-        <p>
-          先建立风格模板，再用车型参考图和内容参数约束分析，最后按工作流生成、编辑并导出。
-        </p>
+        <h2>从选题、看图到自己写初稿</h2>
+        <p>在工作台一篇篇写，直接积累自己的文案风格。不再单独维护风格库。</p>
         <div className="guide-actions">
-          <Link to="/styles/new" className="btn-secondary px-4 py-2">
-            配置风格
-          </Link>
           <Link to="/workbench/new" className="btn-primary px-4 py-2">
             新建文案
+          </Link>
+          <Link to="/workbench" className="btn-secondary px-4 py-2">
+            打开工作台
           </Link>
         </div>
       </section>
@@ -58,7 +56,7 @@ export function HomePage(): React.JSX.Element {
         <div className="guide-section-heading">
           <div>
             <h3>推荐使用流程</h3>
-            <p>每一步的产出都会成为下一步的输入，避免无依据地直接生成文案。</p>
+            <p>选题想法 → 视觉素材 → 设计分析 → 初稿文案。</p>
           </div>
         </div>
         <ol className="guide-steps">
@@ -82,19 +80,19 @@ export function HomePage(): React.JSX.Element {
 
       <section className="guide-principles">
         <div>
-          <span>视觉观察</span>
+          <span>视觉素材</span>
           <strong>看见什么</strong>
-          <p>参考图、矩形标注与可核查的设计细节。</p>
+          <p>车型图、角色和比较说明，作为对照看图的证据。</p>
         </div>
         <div>
           <span>PFDBI</span>
           <strong>讲什么</strong>
-          <p>将事实、推断和个人偏好分开组织。</p>
+          <p>人眼观察后写下事实、推断和判断。</p>
         </div>
         <div>
-          <span>Style DNA</span>
+          <span>初稿</span>
           <strong>怎么说</strong>
-          <p>匹配语言习惯、叙事节奏和结构模板。</p>
+          <p>自己写正文，用时长和字数检查节奏。</p>
         </div>
       </section>
     </div>

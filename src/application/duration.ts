@@ -1,11 +1,12 @@
 import type { DurationProfile } from '@schemas/index'
 import { countWords } from '@infrastructure/filesystem/document-parser'
+import { WORDS_PER_MINUTE } from '@shared/constants'
 
 export const DEFAULT_DURATION: DurationProfile = {
   id: 'zh-default',
   name: '中文口播默认',
   language: 'zh',
-  wordsPerMinute: 290,
+  wordsPerMinute: WORDS_PER_MINUTE,
   tolerancePercent: 10
 }
 

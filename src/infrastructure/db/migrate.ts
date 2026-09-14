@@ -57,7 +57,8 @@ const STATEMENTS = [
     commercial_json TEXT NOT NULL,
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    facts TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE TABLE IF NOT EXISTS scripts (
     id TEXT PRIMARY KEY,
@@ -124,6 +125,22 @@ const STATEMENTS = [
     id TEXT PRIMARY KEY,
     json TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS style_ingest_jobs (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    content TEXT NOT NULL,
+    word_count INTEGER NOT NULL,
+    parse_status TEXT NOT NULL,
+    parse_error TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    progress_percent INTEGER NOT NULL DEFAULT 0,
+    progress_message TEXT NOT NULL DEFAULT '',
+    preview_json TEXT,
+    style_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS llm_usage (
     id TEXT PRIMARY KEY,
     project_id TEXT,
@@ -148,6 +165,7 @@ export function runMigrations(db: AppDatabase): void {
   ensureColumn(db, 'reference_images', 'role', "TEXT NOT NULL DEFAULT 'primary'")
   ensureColumn(db, 'reference_images', 'vehicle_label', "TEXT NOT NULL DEFAULT ''")
   ensureColumn(db, 'reference_images', 'comparison_note', "TEXT NOT NULL DEFAULT ''")
+  ensureColumn(db, 'projects', 'facts', "TEXT NOT NULL DEFAULT ''")
   db.exec("UPDATE reference_images SET role = 'other' WHERE role IN ('vertical', 'horizontal')")
   db.exec(`UPDATE styles SET category = '设计观点' WHERE category NOT IN (
     '车型解读','设计知识','设计观点','设计回顾','新车热点','设计跨界'

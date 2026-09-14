@@ -257,7 +257,7 @@ function OverviewPane({
         <div>
           <h3>档案信息</h3>
           <p>
-            可随时改名称、平台、内容类型和备注，不会重新提取 Style DNA。
+            可随时改名称、平台、内容类型和风格简介，不会重新提取 Style DNA。
             {detail.isDemo ? ' 当前是 DEMO DATA（虚构演示，非真实博主）。' : ''}
           </p>
         </div>

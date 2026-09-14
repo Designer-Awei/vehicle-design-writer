@@ -10,3 +10,5 @@ out
 *.db
 data/
 .e2e-user-data*/
+archive/e2e-user-data/**
+!archive/e2e-user-data/README.md

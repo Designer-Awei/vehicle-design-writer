@@ -12,7 +12,7 @@ const baseUrl = (process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn
   /\/$/,
   ''
 )
-const textModel = process.env.SILICONFLOW_TEXT_MODEL || 'deepseek-ai/DeepSeek-V4-Flash'
+const textModel = process.env.SILICONFLOW_TEXT_MODEL || 'Qwen/Qwen3.5-27B'
 const visionModel = process.env.SILICONFLOW_VISION_MODEL || 'Qwen/Qwen3-VL-32B-Instruct'
 
 if (!apiKey) {

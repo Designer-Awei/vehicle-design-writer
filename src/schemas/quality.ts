@@ -22,6 +22,20 @@ export const ScriptSchema = z.object({
 
 export const TemplateMatchSchema = z.object({
   templateName: z.string(),
+  reason: z.string(),
+  styleId: z.string().nullable().optional(),
+  styleName: z.string().optional()
+})
+
+/** Agent 从已入库风格卡中挑选一张，或明确改用中性结构。 */
+export const StyleSelectSchema = z.object({
+  styleId: z.preprocess((value) => {
+    if (value == null) return ''
+    if (typeof value !== 'string') return String(value)
+    const trimmed = value.trim()
+    if (!trimmed || trimmed === 'null' || trimmed === 'none' || trimmed === 'neutral') return ''
+    return trimmed
+  }, z.string()),
   reason: z.string()
 })
 
@@ -43,5 +57,6 @@ export const RewriteSchema = z.object({
 export type QualityReport = z.infer<typeof QualityReportSchema>
 export type ScriptDraft = z.infer<typeof ScriptSchema>
 export type TemplateMatch = z.infer<typeof TemplateMatchSchema>
+export type StyleSelect = z.infer<typeof StyleSelectSchema>
 export type StyleQuality = z.infer<typeof StyleQualitySchema>
 export type RewriteResult = z.infer<typeof RewriteSchema>

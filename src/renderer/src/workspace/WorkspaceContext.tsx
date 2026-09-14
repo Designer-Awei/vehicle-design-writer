@@ -26,6 +26,9 @@ export interface WorkspaceBarConfig {
   stages?: WorkspaceStage[]
   activeStage?: string
   onStageSelect?: (id: string) => void
+  titleOptions?: Array<{ id: string; label: string }>
+  selectedTitleId?: string
+  onTitleSelect?: (id: string) => void
 }
 
 interface WorkspaceContextValue {
@@ -55,14 +58,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }): React.
 export function useWorkspaceBar(config: WorkspaceBarConfig): void {
   const { setConfig } = useContext(WorkspaceContext)
   const onStageSelectRef = useRef(config.onStageSelect)
+  const onTitleSelectRef = useRef(config.onTitleSelect)
   const stagesKey =
     config.stages
       ?.map((item) => `${item.id}:${item.label}:${item.to ?? ''}:${item.disabled ? '1' : '0'}`)
       .join('|') ?? ''
+  const titlesKey = config.titleOptions?.map((item) => `${item.id}:${item.label}`).join('|') ?? ''
 
   useEffect(() => {
     onStageSelectRef.current = config.onStageSelect
   }, [config.onStageSelect])
+
+  useEffect(() => {
+    onTitleSelectRef.current = config.onTitleSelect
+  }, [config.onTitleSelect])
 
   useLayoutEffect(() => {
     setConfig({
@@ -70,14 +79,19 @@ export function useWorkspaceBar(config: WorkspaceBarConfig): void {
       title: config.title,
       stages: config.stages,
       activeStage: config.activeStage,
-      onStageSelect: (id) => onStageSelectRef.current?.(id)
+      onStageSelect: (id) => onStageSelectRef.current?.(id),
+      titleOptions: config.titleOptions,
+      selectedTitleId: config.selectedTitleId,
+      onTitleSelect: (id) => onTitleSelectRef.current?.(id)
     })
   }, [
     config.parent?.to,
     config.parent?.label,
     config.title,
     config.activeStage,
+    config.selectedTitleId,
     stagesKey,
+    titlesKey,
     setConfig
   ])
 

@@ -20,7 +20,12 @@ const api: AppApi = {
     replaceFolder: (styleId) => ipcRenderer.invoke(IPC.stylesReplaceFolder, styleId),
     extract: (styleId) => ipcRenderer.invoke(IPC.stylesExtract, styleId),
     update: (id, patch) => ipcRenderer.invoke(IPC.stylesUpdate, id, patch),
-    remove: (id) => ipcRenderer.invoke(IPC.stylesRemove, id)
+    remove: (id) => ipcRenderer.invoke(IPC.stylesRemove, id),
+    ingestPick: () => ipcRenderer.invoke(IPC.stylesIngestPick),
+    listJobs: () => ipcRenderer.invoke(IPC.stylesJobsList),
+    retryJob: (jobId) => ipcRenderer.invoke(IPC.stylesJobRetry, jobId),
+    confirmJob: (jobId, patch) => ipcRenderer.invoke(IPC.stylesJobConfirm, jobId, patch),
+    discardJob: (jobId) => ipcRenderer.invoke(IPC.stylesJobDiscard, jobId)
   },
   projects: {
     list: () => ipcRenderer.invoke(IPC.projectsList),
@@ -36,6 +41,7 @@ const api: AppApi = {
       ipcRenderer.invoke(IPC.projectsRemoveAnnotation, annotationId),
     analyzeVision: (projectId) => ipcRenderer.invoke(IPC.projectsAnalyzeVision, projectId),
     analyzePfdbi: (projectId) => ipcRenderer.invoke(IPC.projectsAnalyzePfdbi, projectId),
+    savePfdbi: (projectId, analysis) => ipcRenderer.invoke(IPC.projectsSavePfdbi, projectId, analysis),
     generate: (projectId) => ipcRenderer.invoke(IPC.projectsGenerate, projectId),
     rewrite: (projectId, selectedText, instruction) =>
       ipcRenderer.invoke(IPC.projectsRewrite, projectId, selectedText, instruction),
@@ -48,6 +54,10 @@ const api: AppApi = {
     pickImages: () => ipcRenderer.invoke(IPC.dialogImages),
     saveFile: (defaultName) => ipcRenderer.invoke(IPC.dialogSave, defaultName)
   },
+  menu: {
+    popup: (id, x, y) => ipcRenderer.invoke(IPC.menuPopup, id, x, y)
+  },
+  platform: process.platform,
   onProgress: (handler: (progress: WorkflowProgress) => void) => {
     const listener = (_event: unknown, progress: WorkflowProgress): void => handler(progress)
     ipcRenderer.on(IPC.workflowProgress, listener)

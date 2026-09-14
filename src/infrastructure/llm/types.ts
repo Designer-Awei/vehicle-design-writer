@@ -10,6 +10,7 @@ export type LLMTask =
   | 'style_adapter'
   | 'script_quality'
   | 'template_match'
+  | 'style_select'
   | 'rewrite'
   | 'json_repair'
   | 'commercial_adapter'

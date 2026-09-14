@@ -16,12 +16,57 @@ import type {
 
 export type { ImageAnnotation }
 
+export type AppMenuId = 'file' | 'edit' | 'view' | 'window' | 'help'
+
 export interface WorkflowProgress {
   projectId?: string
   styleId?: string
+  jobId?: string
   stage: string
   message: string
   percent: number
+}
+
+/** 按篇提取完成后、确认入库前的预览风格卡。 */
+export interface StylePreviewCard {
+  author: string
+  platform: string
+  category: string
+  summary: string
+  notes: string
+  sourceFilename: string
+  wordCount: number
+  profile: StyleProfile
+  templates: StructureTemplate[]
+  examples: ExampleCase[]
+}
+
+export type StyleIngestJobStatus =
+  | 'queued'
+  | 'extracting'
+  | 'completed'
+  | 'failed'
+  | 'ingested'
+
+export interface StyleIngestJob {
+  id: string
+  filename: string
+  wordCount: number
+  status: StyleIngestJobStatus
+  error: string | null
+  progressPercent: number
+  progressMessage: string
+  preview: StylePreviewCard | null
+  styleId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StyleIngestConfirmPatch {
+  author: string
+  category: string
+  platform: string
+  notes?: string
 }
 
 export interface TokenUsageItem {
@@ -81,6 +126,7 @@ export interface ProjectRecord {
   styleId: string | null
   commercial: CommercialBrief
   status: string
+  facts: string
   createdAt: string
   updatedAt: string
 }
@@ -120,7 +166,12 @@ export interface ProjectDetail extends ProjectRecord {
   baseDraft: ScriptDraft | null
   finalDraft: ScriptDraft | null
   quality: QualityReport | null
-  matchedTemplate: { templateName: string; reason: string } | null
+  matchedTemplate: {
+    templateName: string
+    reason: string
+    styleId?: string | null
+    styleName?: string
+  } | null
   versions: ScriptVersionRecord[]
   usage: TokenUsageItem[]
 }
@@ -135,6 +186,7 @@ export interface ScanFileResult {
 export interface CreateProjectInput {
   topic: string
   draft: string
+  facts?: string
   platform: string
   durationSeconds: number
   contentType: string
@@ -181,6 +233,11 @@ export interface AppApi {
     extract: (styleId: string) => Promise<StyleDetail>
     update: (id: string, patch: StyleMetadataPatch) => Promise<StyleRecord>
     remove: (id: string) => Promise<void>
+    ingestPick: () => Promise<StyleIngestJob[]>
+    listJobs: () => Promise<StyleIngestJob[]>
+    retryJob: (jobId: string) => Promise<StyleIngestJob>
+    confirmJob: (jobId: string, patch: StyleIngestConfirmPatch) => Promise<StyleRecord>
+    discardJob: (jobId: string) => Promise<void>
   }
   projects: {
     list: () => Promise<ProjectRecord[]>
@@ -197,6 +254,7 @@ export interface AppApi {
     removeAnnotation: (annotationId: string) => Promise<void>
     analyzeVision: (projectId: string) => Promise<ProjectDetail>
     analyzePfdbi: (projectId: string) => Promise<ProjectDetail>
+    savePfdbi: (projectId: string, analysis: PFDBIAnalysis) => Promise<ProjectDetail>
     generate: (projectId: string) => Promise<ProjectDetail>
     rewrite: (projectId: string, selectedText: string, instruction: string) => Promise<string>
     restoreVersion: (versionId: string) => Promise<ProjectDetail>
@@ -208,6 +266,10 @@ export interface AppApi {
     pickImages: () => Promise<string[]>
     saveFile: (defaultName: string) => Promise<string | null>
   }
+  menu: {
+    popup: (id: AppMenuId, x: number, y: number) => Promise<void>
+  }
+  platform: 'win32' | 'darwin' | 'linux' | string
   onProgress: (handler: (progress: WorkflowProgress) => void) => () => void
 }
 
@@ -228,6 +290,11 @@ export const IPC = {
   stylesExtract: 'styles:extract',
   stylesUpdate: 'styles:update',
   stylesRemove: 'styles:remove',
+  stylesIngestPick: 'styles:ingestPick',
+  stylesJobsList: 'styles:jobsList',
+  stylesJobRetry: 'styles:jobRetry',
+  stylesJobConfirm: 'styles:jobConfirm',
+  stylesJobDiscard: 'styles:jobDiscard',
   projectsList: 'projects:list',
   projectsGet: 'projects:get',
   projectsCreate: 'projects:create',
@@ -239,6 +306,7 @@ export const IPC = {
   projectsRemoveAnnotation: 'projects:removeAnnotation',
   projectsAnalyzeVision: 'projects:analyzeVision',
   projectsAnalyzePfdbi: 'projects:analyzePfdbi',
+  projectsSavePfdbi: 'projects:savePfdbi',
   projectsGenerate: 'projects:generate',
   projectsRewrite: 'projects:rewrite',
   projectsRestoreVersion: 'projects:restoreVersion',
@@ -247,5 +315,6 @@ export const IPC = {
   dialogFolder: 'dialog:folder',
   dialogImages: 'dialog:images',
   dialogSave: 'dialog:save',
+  menuPopup: 'menu:popup',
   workflowProgress: 'workflow:progress'
 } as const

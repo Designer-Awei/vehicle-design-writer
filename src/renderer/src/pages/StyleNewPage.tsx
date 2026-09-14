@@ -5,11 +5,11 @@ import { FieldInline } from '@renderer/components/FieldInline'
 import { STYLE_STAGES } from '@renderer/navigation'
 import { useWorkspaceBar } from '@renderer/workspace/WorkspaceContext'
 import type { ScanFileResult, WorkflowProgress } from '@shared/ipc'
-import { PLATFORMS, STYLE_CATEGORIES } from '@shared/constants'
+import { PLATFORMS, STYLE_CATEGORIES, STYLE_NOTES_LIMIT } from '@shared/constants'
 import { ipcErrorMessage } from '@renderer/lib/utils'
 
 /**
- * 新增写作风格：一次选择完成档案创建与样本导入，再提取 DNA。
+ * 高级入口：先建档案再选文件夹，把多篇聚合成一张 Style DNA。
  */
 export function StyleNewPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -52,7 +52,7 @@ export function StyleNewPage(): React.JSX.Element {
         name: name.trim(),
         platform,
         category: category.trim(),
-        notes: notes.trim()
+        notes: notes.trim().slice(0, STYLE_NOTES_LIMIT)
       })
       if (!result) return
       setStyleId(result.style.id)
@@ -140,9 +140,9 @@ export function StyleNewPage(): React.JSX.Element {
   return (
     <div className="page-fill">
       <div>
-        <h2 className="text-xl font-semibold">用历史文案创建 Style DNA</h2>
+        <h2 className="text-xl font-semibold">高级：用文件夹聚合 Style DNA</h2>
         <p className="mt-1 text-sm text-[#9a8f82]">
-          填写基本信息后直接选择文案文件夹，无需先保存空档案。
+          默认请回风格库按篇上传。这里适合已经确认是同一博主的多篇口播稿，一次聚合成一张卡。
         </p>
       </div>
       {error ? (
@@ -235,14 +235,15 @@ export function StyleNewPage(): React.JSX.Element {
                 ))}
               </select>
             </FieldInline>
-            <FieldInline label="备注" htmlFor="styleNotes">
+            <FieldInline label="风格简介" htmlFor="styleNotes">
               <input
                 id="styleNotes"
                 className="rounded bg-[#0c0b0a] px-3 py-2 text-[#f3ece1]"
-                placeholder="选填"
+                maxLength={STYLE_NOTES_LIMIT}
+                placeholder="提取后自动生成，也可先填 20 字以内"
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                onBlur={() => void persistMeta({ notes })}
+                onChange={(e) => setNotes(e.target.value.slice(0, STYLE_NOTES_LIMIT))}
+                onBlur={() => void persistMeta({ notes: notes.trim().slice(0, STYLE_NOTES_LIMIT) })}
               />
             </FieldInline>
           </div>
