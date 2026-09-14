@@ -28,4 +28,4 @@ UI（React）
 
 ## 数据
 
-本地 SQLite（`node:sqlite` DatabaseSync）位于 `userData/vehicle-design-writer.sqlite`。图片复制到 `userData/images/{projectId}`，库中只存路径与 hash。
+本地 SQLite（`node:sqlite` DatabaseSync）位于 `userData/vehicle-design-writer.sqlite`，用于设置等。已保存文案在安装目录 `data/projects/{标题}/`（可在设置中改自定义根目录；默认始终解析为当前安装目录，不会把某次便携路径写死）。项目文件夹内是 `参考图/` + `项目.json`。上传参考图先留在内存，点保存才写入该文件夹。导出把该文件夹打成 zip 安装包并让用户选择地址。导入 zip 或旧文件夹时复制进项目库。

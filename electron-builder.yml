@@ -16,13 +16,9 @@ asarUnpack:
 win:
   icon: icon.ico
   executableName: 汽车设计文案助手
-  artifactName: 汽车设计文案助手-${version}-portable.${ext}
   requestedExecutionLevel: asInvoker
   target:
     - target: nsis
-      arch:
-        - x64
-    - target: zip
       arch:
         - x64
 nsis:
@@ -40,26 +36,9 @@ nsis:
   deleteAppDataOnUninstall: false
   differentialPackage: false
   artifactName: 汽车设计文案助手-${version}-setup.${ext}
-mac:
-  entitlementsInherit: build/entitlements.mac.plist
-  extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
-  notarize: false
-dmg:
-  artifactName: ${name}-${version}.${ext}
-linux:
-  icon: icon.png
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
+publish:
+  provider: generic
+  url: https://updates.local
 npmRebuild: false
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

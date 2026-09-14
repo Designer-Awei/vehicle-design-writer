@@ -19,7 +19,8 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "icons": "node scripts/make-app-icon.mjs",
-    "build:win": "npm run build && electron-builder --win --publish never",
+    "build:win": "npm run build && electron-builder --win --publish never && node scripts/tidy-dist.mjs",
+    "dist": "npm run build:win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux"
   },

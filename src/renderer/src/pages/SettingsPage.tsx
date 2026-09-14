@@ -3,7 +3,7 @@ import { useWorkspaceBar, WorkspaceActions } from '@renderer/workspace/Workspace
 import type { DurationProfile, LlmSettings } from '@schemas/index'
 
 /**
- * SiliconFlow 与模型配置。API Key 只通过 IPC 写入主进程。
+ * SiliconFlow、本地存储目录与时长配置。API Key 只通过 IPC 写入主进程。
  */
 export function SettingsPage(): React.JSX.Element {
   const [settings, setSettings] = useState<LlmSettings | null>(null)
@@ -14,17 +14,18 @@ export function SettingsPage(): React.JSX.Element {
   const [probing, setProbing] = useState(false)
   const [probeText, setProbeText] = useState('')
   const [probeVision, setProbeVision] = useState('')
-  const [stage, setStage] = useState<'model' | 'duration'>('model')
+  const [stage, setStage] = useState<'model' | 'storage' | 'duration'>('model')
 
   useWorkspaceBar({
     title: '设置',
     stages: [
       { id: 'model', label: '模型与接口' },
+      { id: 'storage', label: '存储' },
       { id: 'duration', label: '时长配置' }
     ],
     activeStage: stage,
     onStageSelect: (id) => {
-      if (id === 'model' || id === 'duration') setStage(id)
+      if (id === 'model' || id === 'storage' || id === 'duration') setStage(id)
     }
   })
 
@@ -58,6 +59,43 @@ export function SettingsPage(): React.JSX.Element {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  /**
+   * 选择已保存项目所在的根目录。只有主动选择才会记住；恢复默认会跟当前安装目录走。
+   */
+  async function pickProjectRoot(): Promise<void> {
+    setMessage('')
+    try {
+      const next = await window.api.settings.pickProjectRoot()
+      if (!next) return
+      setSettings(next)
+      setMessage('已改项目存储目录。之后保存会写到这里。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * 恢复成当前安装目录下的 data/projects。
+   */
+  async function resetProjectRoot(): Promise<void> {
+    setMessage('')
+    try {
+      setSettings(await window.api.settings.resetProjectRoot())
+      setMessage('已恢复默认项目目录（当前安装目录 / data / projects）。')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * 用资源管理器打开当前项目库。
+   */
+  async function openProjectRoot(): Promise<void> {
+    setMessage('')
+    const error = await window.api.settings.openProjectRoot()
+    if (error) setMessage(error)
   }
 
   /**
@@ -161,7 +199,43 @@ export function SettingsPage(): React.JSX.Element {
           ) : null}
           {probeText ? <div className="text-sm text-[#cfc3b5]">文字：{probeText}</div> : null}
           {probeVision ? <div className="text-sm text-[#cfc3b5]">视觉：{probeVision}</div> : null}
-          {message ? <div className="col-span-2 text-sm text-[#c4a574]">{message}</div> : null}
+          {message && stage === 'model' ? (
+            <div className="col-span-2 text-sm text-[#c4a574]">{message}</div>
+          ) : null}
+        </div>
+      ) : stage === 'storage' ? (
+        <div className="max-w-3xl space-y-4">
+          <section className="space-y-4 rounded-2xl border border-[#2a241e] bg-[#161310] p-5 text-sm">
+            <div className="text-[#c4a574]">项目存储</div>
+            <p className="leading-6 text-[#9a8f82]">
+              点击保存后，会在这个目录下按标题新建项目文件夹（参考图 + 项目.json）。默认始终跟当前安装目录走：安装目录/data/projects。
+            </p>
+            <label className="block text-[#9a8f82]">
+              当前目录
+              <input
+                className="mt-1.5 w-full rounded bg-[#0c0b0a] px-3 py-2 text-[#f3ece1]"
+                value={settings.projectRoot}
+                readOnly
+              />
+            </label>
+            <p className="text-xs leading-5 text-[#9a8f82]">
+              默认：{settings.defaultProjectRoot}
+              {settings.projectRoot === settings.defaultProjectRoot ? '（正在使用）' : ''}
+              。只有点「选择目录」才会记住自定义路径；「恢复默认」会清掉记忆，继续跟当前安装目录走。
+            </p>
+            <div className="storage-actions">
+              <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={() => void pickProjectRoot()}>
+                选择目录
+              </button>
+              <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => void resetProjectRoot()}>
+                恢复默认
+              </button>
+              <button type="button" className="btn-ghost px-3 py-1.5 text-sm" onClick={() => void openProjectRoot()}>
+                打开目录
+              </button>
+            </div>
+          </section>
+          {message ? <div className="text-sm text-[#c4a574]">{message}</div> : null}
         </div>
       ) : (
         <div className="rounded-2xl border border-[#2a241e] bg-[#161310] p-5 text-sm">

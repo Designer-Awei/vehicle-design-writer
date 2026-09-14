@@ -5,6 +5,9 @@ const api: AppApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC.settingsGet),
     save: (input) => ipcRenderer.invoke(IPC.settingsSave, input),
+    pickProjectRoot: () => ipcRenderer.invoke(IPC.settingsPickProjectRoot),
+    resetProjectRoot: () => ipcRenderer.invoke(IPC.settingsResetProjectRoot),
+    openProjectRoot: () => ipcRenderer.invoke(IPC.settingsOpenProjectRoot),
     listModels: () => ipcRenderer.invoke(IPC.settingsModels),
     getPlatforms: () => ipcRenderer.invoke(IPC.settingsPlatforms),
     getDurations: () => ipcRenderer.invoke(IPC.settingsDurations),
@@ -46,7 +49,10 @@ const api: AppApi = {
     rewrite: (projectId, selectedText, instruction) =>
       ipcRenderer.invoke(IPC.projectsRewrite, projectId, selectedText, instruction),
     restoreVersion: (versionId) => ipcRenderer.invoke(IPC.projectsRestoreVersion, versionId),
+    save: (projectId) => ipcRenderer.invoke(IPC.projectsSave, projectId),
     export: (projectId, format) => ipcRenderer.invoke(IPC.projectsExport, projectId, format),
+    exportBundle: (projectId) => ipcRenderer.invoke(IPC.projectsExportBundle, projectId),
+    importBundle: () => ipcRenderer.invoke(IPC.projectsImportBundle),
     remove: (id) => ipcRenderer.invoke(IPC.projectsRemove, id)
   },
   dialog: {

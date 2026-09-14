@@ -25,7 +25,7 @@ const GUIDE_STEPS = [
   },
   {
     title: '改到能发再导出',
-    description: '继续改稿。多写几篇，就是你自己的文案风格积累。',
+    description: '点保存写入项目库；导出时把当前项目文件夹打成 zip 安装包，自选保存地址。',
     icon: FileOutput
   }
 ] as const

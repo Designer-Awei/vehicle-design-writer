@@ -1,7 +1,7 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { extname, join } from 'path'
-import { readdirSync, statSync, writeFileSync } from 'fs'
-import { createId, nowIso } from '@domain/ids'
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { createId } from '@domain/ids'
 import { runStyleExtraction } from '@application/workflows/StyleExtractionWorkflow'
 import {
   runDraftGeneration,
@@ -9,19 +9,18 @@ import {
   runRewrite,
   runVisionAnalysis
 } from '@application/workflows/DraftGenerationWorkflow'
-import { parseDocumentFile, hashFile } from '@infrastructure/filesystem/document-parser'
-import { isSupportedImage, storeImage, toDataUrl } from '@infrastructure/filesystem/image-store'
+import { parseDocumentFile } from '@infrastructure/filesystem/document-parser'
+import { toDataUrl } from '@infrastructure/filesystem/image-store'
 import { encryptSecret } from '@infrastructure/security/secret-store'
 import { clipStyleNotes } from '@application/style-preview'
-import type {
-  ImageAnnotation,
-  LlmSettings,
-  PFDBIAnalysis,
-  ScriptDraft,
-  QualityReport,
-  TemplateMatch
+import {
+  type ImageAnnotation,
+  type LlmSettings,
+  type PFDBIAnalysis,
+  type ScriptDraft,
+  type QualityReport,
+  type TemplateMatch
 } from '@schemas/index'
-import { PFDBIAnalysisSchema } from '@schemas/index'
 import {
   IPC,
   type CreateProjectInput,
@@ -35,7 +34,24 @@ import {
 } from '@shared/ipc'
 import { probeSiliconFlow } from '@application/probe-siliconflow'
 import { createLlm, readApiKey, type AppContext } from './app-context'
+import { getDefaultProjectsRoot, PROJECTS_ROOT_SETTING, resolveProjectsRoot } from './paths'
 import { popupAppMenu, type AppMenuId } from './app-menu'
+import {
+  addSessionImages,
+  createSessionProject,
+  exportSessionZip,
+  getSessionProject,
+  importSessionPackage,
+  listSessionProjects,
+  removeSessionAnnotation,
+  removeSessionImage,
+  removeSessionProject,
+  saveSessionAnnotation,
+  saveSessionPfdbi,
+  saveSessionProject,
+  updateSessionImage,
+  updateSessionProject
+} from './project-session'
 import {
   confirmStyleIngestJob,
   discardStyleIngestJob,
@@ -91,6 +107,29 @@ export function registerIpc(ctx: AppContext): void {
       textModel: settings.textModel,
       visionModel: settings.visionModel
     })
+  })
+  ipcMain.handle(IPC.settingsPickProjectRoot, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const picked = await dialog.showOpenDialog(window!, {
+      title: '选择项目存储目录',
+      defaultPath: resolveProjectsRoot(ctx.repos),
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (picked.canceled || !picked.filePaths[0]) return null
+    const next = picked.filePaths[0]
+    mkdirSync(next, { recursive: true })
+    ctx.repos.setSetting(PROJECTS_ROOT_SETTING, next)
+    return getSettings(ctx)
+  })
+  ipcMain.handle(IPC.settingsResetProjectRoot, () => {
+    ctx.repos.deleteSetting(PROJECTS_ROOT_SETTING)
+    mkdirSync(getDefaultProjectsRoot(), { recursive: true })
+    return getSettings(ctx)
+  })
+  ipcMain.handle(IPC.settingsOpenProjectRoot, async () => {
+    const root = resolveProjectsRoot(ctx.repos)
+    mkdirSync(root, { recursive: true })
+    return shell.openPath(root)
   })
 
   ipcMain.handle(IPC.stylesList, () => ctx.repos.listStyles())
@@ -191,80 +230,16 @@ export function registerIpc(ctx: AppContext): void {
 
   startStyleIngestQueue(ctx)
 
-  ipcMain.handle(IPC.projectsList, () => ctx.repos.listProjects())
-  ipcMain.handle(IPC.projectsGet, (_event, id: string) => getProjectDetail(ctx, id))
-  ipcMain.handle(IPC.projectsCreate, async (_event, input: CreateProjectInput) => {
-    const id = createId('proj')
-    const now = nowIso()
-    ctx.repos.upsertProject({
-      id,
-      title: input.topic.slice(0, 40) || '未命名文案',
-      topic: input.topic,
-      draft: input.draft,
-      facts: input.facts ?? '',
-      platform: input.platform,
-      durationSeconds: input.durationSeconds,
-      contentType: input.contentType,
-      styleId: input.styleId,
-      commercial: input.commercial ?? {
-        enabled: false,
-        brand: '',
-        model: '',
-        goal: '',
-        sellingPoints: [],
-        mustInclude: [],
-        mustAvoid: [],
-        placement: 'narrative',
-        cta: ''
-      },
-      status: 'draft',
-      createdAt: now,
-      updatedAt: now
-    })
-    for (const [index, imagePath] of (input.imagePaths ?? []).entries()) {
-      addImageFromPath(ctx, id, imagePath, index)
-    }
-    return getProjectDetail(ctx, id)
-  })
+  ipcMain.handle(IPC.projectsList, () => listSessionProjects(ctx))
+  ipcMain.handle(IPC.projectsGet, (_event, id: string) => getSessionProject(ctx, id))
+  ipcMain.handle(IPC.projectsCreate, (_event, input: CreateProjectInput) => createSessionProject(ctx, input))
   ipcMain.handle(
     IPC.projectsUpdate,
     (
       _event,
       id: string,
       patch: Partial<CreateProjectInput> & { title?: string; finalScript?: string }
-    ) => {
-      const current = ctx.repos.getProject(id)
-      if (!current) throw new Error('项目不存在')
-      const next = {
-        ...current,
-        title: patch.title ?? current.title,
-        topic: patch.topic ?? current.topic,
-        draft: patch.draft ?? current.draft,
-        facts: patch.facts ?? current.facts,
-        platform: patch.platform ?? current.platform,
-        durationSeconds: patch.durationSeconds ?? current.durationSeconds,
-        contentType: patch.contentType ?? current.contentType,
-        styleId: patch.styleId === undefined ? current.styleId : patch.styleId,
-        commercial: patch.commercial ?? current.commercial,
-        status: current.status,
-        updatedAt: nowIso()
-      }
-      ctx.repos.upsertProject(next)
-      if (patch.finalScript != null) {
-        const finalDraft = ctx.repos.getScript<ScriptDraft>(id, 'final') ?? {
-          title: next.title,
-          outline: [],
-          script: patch.finalScript,
-          pfdbiReferences: []
-        }
-        ctx.repos.saveScript(id, 'final', {
-          ...finalDraft,
-          title: next.title,
-          script: patch.finalScript
-        })
-      }
-      return getProjectDetail(ctx, id)
-    }
+    ) => updateSessionProject(ctx, id, patch)
   )
   ipcMain.handle(IPC.projectsAddImages, async (event, projectId: string) => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -273,32 +248,19 @@ export function registerIpc(ctx: AppContext): void {
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
     })
     if (picked.canceled) return []
-    const existing = ctx.repos.listImages(projectId).length
-    for (const [index, filePath] of picked.filePaths.entries()) {
-      addImageFromPath(ctx, projectId, filePath, existing + index)
-    }
-    return getProjectDetail(ctx, projectId)?.images ?? []
+    return addSessionImages(ctx, projectId, picked.filePaths)
   })
   ipcMain.handle(IPC.projectsRemoveImage, (_event, imageId: string) => {
-    ctx.repos.deleteImage(imageId)
+    removeSessionImage(ctx, imageId)
   })
   ipcMain.handle(IPC.projectsUpdateImage, (_event, imageId: string, patch: ImageMetadataPatch) => {
-    ctx.repos.updateImage(imageId, patch)
-    const image = ctx.repos.getImage(imageId)
-    if (!image) throw new Error('参考图不存在')
-    return {
-      ...image,
-      sortOrder:
-        ctx.repos.listImages(image.projectId).find((item) => item.id === imageId)?.sortOrder ?? 0,
-      dataUrl: toDataUrl(image.path),
-      annotations: ctx.repos.listAnnotations(imageId)
-    }
+    return updateSessionImage(ctx, imageId, patch)
   })
   ipcMain.handle(IPC.projectsSaveAnnotation, (_event, annotation: ImageAnnotation) => {
-    return ctx.repos.saveAnnotation(annotation)
+    return saveSessionAnnotation(ctx, annotation)
   })
   ipcMain.handle(IPC.projectsRemoveAnnotation, (_event, annotationId: string) => {
-    ctx.repos.deleteAnnotation(annotationId)
+    removeSessionAnnotation(ctx, annotationId)
   })
   ipcMain.handle(IPC.projectsAnalyzeVision, async (event, projectId: string) => {
     const { provider, router } = createLlm(ctx.repos)
@@ -321,9 +283,7 @@ export function registerIpc(ctx: AppContext): void {
     return getProjectDetail(ctx, projectId)
   })
   ipcMain.handle(IPC.projectsSavePfdbi, (_event, projectId: string, analysis: PFDBIAnalysis) => {
-    const parsed = PFDBIAnalysisSchema.parse(analysis)
-    ctx.repos.savePfdbi(projectId, parsed, `human:${projectId}`)
-    return getProjectDetail(ctx, projectId)
+    return saveSessionPfdbi(ctx, projectId, analysis)
   })
   ipcMain.handle(IPC.projectsGenerate, async (event, projectId: string) => {
     const { provider, router } = createLlm(ctx.repos)
@@ -361,7 +321,7 @@ export function registerIpc(ctx: AppContext): void {
     return getProjectDetail(ctx, version.projectId)
   })
   ipcMain.handle(IPC.projectsExport, async (event, projectId: string, format: 'txt' | 'md') => {
-    const detail = getProjectDetail(ctx, projectId)
+    const detail = getSessionProject(ctx, projectId)
     if (!detail?.finalDraft) return null
     const window = BrowserWindow.fromWebContents(event.sender)
     const defaultName = `${detail.title}.${format}`
@@ -374,8 +334,36 @@ export function registerIpc(ctx: AppContext): void {
     writeFileSync(picked.filePath, body, 'utf8')
     return picked.filePath
   })
+  ipcMain.handle(IPC.projectsSave, (_event, projectId: string) => saveSessionProject(ctx, projectId))
+  ipcMain.handle(IPC.projectsExportBundle, async (event, projectId: string) => {
+    const detail = getSessionProject(ctx, projectId)
+    if (!detail) throw new Error('项目不存在')
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const defaultName = `${detail.title || detail.topic || '文案项目'}.zip`
+    const picked = await dialog.showSaveDialog(window!, {
+      title: '导出项目安装包',
+      defaultPath: defaultName,
+      filters: [{ name: '项目安装包', extensions: ['zip'] }]
+    })
+    if (picked.canceled || !picked.filePath) return null
+    return exportSessionZip(ctx, projectId, picked.filePath)
+  })
+  ipcMain.handle(IPC.projectsImportBundle, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const picked = await dialog.showOpenDialog(window!, {
+      title: '选择要导入的项目安装包或文件夹',
+      buttonLabel: '导入',
+      properties: ['openFile', 'openDirectory'],
+      filters: [
+        { name: '项目安装包', extensions: ['zip'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    if (picked.canceled || !picked.filePaths[0]) return null
+    return importSessionPackage(ctx, picked.filePaths[0])
+  })
   ipcMain.handle(IPC.projectsRemove, (_event, id: string) => {
-    ctx.repos.deleteProject(id)
+    removeSessionProject(ctx, id)
   })
 
   ipcMain.handle(IPC.dialogFolder, async (event) => {
@@ -409,7 +397,9 @@ function getSettings(ctx: AppContext): LlmSettings {
     baseUrl: ctx.repos.getSetting('base_url') || DEFAULT_BASE_URL,
     textModel: ctx.repos.getSetting('text_model') || DEFAULT_TEXT_MODEL,
     visionModel: ctx.repos.getSetting('vision_model') || DEFAULT_VISION_MODEL,
-    hasApiKey: Boolean(readApiKey(ctx.repos))
+    hasApiKey: Boolean(readApiKey(ctx.repos)),
+    projectRoot: resolveProjectsRoot(ctx.repos),
+    defaultProjectRoot: getDefaultProjectsRoot()
   }
 }
 
@@ -477,28 +467,6 @@ function getProjectDetail(ctx: AppContext, id: string): ProjectDetail | null {
     versions: ctx.repos.listVersions(id),
     usage: ctx.repos.listUsage(id)
   }
-}
-
-function addImageFromPath(
-  ctx: AppContext,
-  projectId: string,
-  sourcePath: string,
-  sortOrder: number
-): void {
-  const filename = sourcePath.split(/[/\\]/).pop() ?? sourcePath
-  if (!isSupportedImage(filename)) {
-    throw new Error(`不支持的图片格式：${filename}`)
-  }
-  const id = createId('img')
-  const stored = storeImage(ctx.userData, projectId, id, sourcePath)
-  ctx.repos.insertImage({
-    id,
-    projectId,
-    path: stored,
-    filename,
-    hash: hashFile(stored),
-    sortOrder
-  })
 }
 
 function walkDocs(dir: string): string[] {

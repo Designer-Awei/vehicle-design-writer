@@ -45,7 +45,7 @@ export function ProjectNewPage(): React.JSX.Element {
         <div className="text-xs tracking-[0.18em] text-[#c4a574]">新建文案</div>
         <h2 className="mt-2 text-2xl font-semibold">先定义要回答的问题</h2>
         <p className="mt-2 text-sm leading-6 text-[#9a8f82]">
-          创建后在工作台里补视觉素材、写设计分析和初稿。
+          创建后在工作台里补视觉素材、写设计分析和初稿。点保存才会写入项目库；关掉软件前未保存的内容会丢失。
         </p>
         <label className="mt-6 block text-sm text-[#cfc3b5]" htmlFor="topic">
           选题 / 核心问题

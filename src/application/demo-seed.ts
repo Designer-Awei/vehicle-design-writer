@@ -1,18 +1,18 @@
+import { mkdirSync } from 'fs'
 import { createId, nowIso } from '@domain/ids'
 import { DEFAULT_DURATION } from '@application/duration'
 import { DEFAULT_PLATFORMS } from '@application/platform-profiles'
+import { listProjectFolders } from '@application/project-library'
+import { writeProjectBundle } from '@application/project-bundle'
 import type { Repositories } from '@infrastructure/db/repositories'
+import type { ScriptDraft } from '@schemas/index'
 import {
-  mockBaseDraft,
   mockExamples,
   mockFinalScript,
   mockPfdbi,
-  mockQuality,
   mockStyleProfile,
-  mockTemplates,
-  mockVision
+  mockTemplates
 } from '@infrastructure/llm/mock-payloads'
-import { PROMPT_VERSION } from '@shared/constants'
 
 /**
  * 首次启动写入 DEMO DATA，保证无 API Key 也能演示完整流程。
@@ -67,10 +67,54 @@ export function seedIfEmpty(repos: Repositories): void {
   repos.saveStyleProfile(styleId, mockStyleProfile())
   repos.replaceTemplates(styleId, mockTemplates())
   repos.replaceExamples(styleId, mockExamples())
+}
 
-  const projectId = createId('proj')
-  repos.upsertProject({
-    id: projectId,
+/**
+ * 把旧版 SQLite 项目迁到 data/projects；库为空时再写演示文案。
+ */
+export function migrateOrSeedProjects(repos: Repositories, root: string): void {
+  mkdirSync(root, { recursive: true })
+  if (listProjectFolders(root).length > 0) return
+  const projects = repos.listProjects()
+  if (projects.length > 0) {
+    for (const project of projects) {
+      const finalDraft = repos.getScript<ScriptDraft>(project.id, 'final')
+      writeProjectBundle(root, {
+        id: project.id,
+        title: project.title,
+        topic: project.topic,
+        draft: project.draft,
+        facts: project.facts,
+        platform: project.platform,
+        durationSeconds: project.durationSeconds,
+        contentType: project.contentType,
+        pfdbi: repos.getPfdbi(project.id),
+        script: finalDraft?.script ?? '',
+        images: repos.listImages(project.id).map((image) => ({
+          id: image.id,
+          file: '',
+          filename: image.filename,
+          role: image.role,
+          vehicleLabel: image.vehicleLabel,
+          comparisonNote: image.comparisonNote,
+          sourcePath: image.path
+        })),
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt
+      })
+    }
+    return
+  }
+  seedDemoProject(root)
+}
+
+/**
+ * 项目库为空时写入一份演示文案到 data/projects，不走 SQLite。
+ */
+function seedDemoProject(root: string): void {
+  const now = nowIso()
+  writeProjectBundle(root, {
+    id: createId('proj'),
     title: '演示项目：新能源前脸为什么越来越像（DEMO DATA）',
     topic: '为什么现在很多新能源汽车前脸越来越像？',
     draft: '感觉最近新车前脸都在用细灯带和封闭中网，想做成一期 5 分钟 B 站口播。',
@@ -79,32 +123,10 @@ export function seedIfEmpty(repos: Repositories): void {
     platform: 'B站',
     durationSeconds: 300,
     contentType: '新车热点',
-    styleId,
-    commercial: {
-      enabled: false,
-      brand: '',
-      model: '',
-      goal: '',
-      sellingPoints: [],
-      mustInclude: [],
-      mustAvoid: [],
-      placement: 'narrative',
-      cta: ''
-    },
-    status: 'ready',
+    pfdbi: mockPfdbi(),
+    script: mockFinalScript().script,
+    images: [],
     createdAt: now,
     updatedAt: now
   })
-  const vision = mockVision('img_demo')
-  repos.saveVision(projectId, 'img_demo', vision, `demo:${PROMPT_VERSION}`)
-  repos.savePfdbi(projectId, mockPfdbi(), `demo-pfdbi:${PROMPT_VERSION}`)
-  repos.saveScript(projectId, 'base', mockBaseDraft())
-  repos.saveScript(projectId, 'final', mockFinalScript())
-  repos.saveScript(projectId, 'quality', mockQuality())
-  repos.saveScript(projectId, 'match', {
-    templateName: '车型解读',
-    reason: 'DEMO DATA：演示自动匹配结果。'
-  })
-  repos.addVersion(projectId, 'V1 Base Draft', mockBaseDraft().script)
-  repos.addVersion(projectId, 'V2 Style Adapted', mockFinalScript().script)
 }

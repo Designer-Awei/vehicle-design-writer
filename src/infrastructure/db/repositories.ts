@@ -97,7 +97,9 @@ function mapProject(row: ProjectRow): ProjectRecord {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    facts: row.facts ?? ''
+    facts: row.facts ?? '',
+    folderPath: null,
+    saveStatus: 'saved'
   }
 }
 
@@ -117,6 +119,13 @@ export class Repositories {
       'INSERT INTO app_settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       [key, value]
     )
+  }
+
+  /**
+   * 删掉一项设置，让调用方回到代码里的默认值（例如当前安装目录）。
+   */
+  deleteSetting(key: string): void {
+    this.db.run('DELETE FROM app_settings WHERE key = ?', [key])
   }
 
   listStyles(): StyleRecord[] {

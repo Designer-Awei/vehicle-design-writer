@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -47,7 +47,18 @@ import { runDraftGeneration, runPfdbiAnalysis, runVisionAnalysis } from '../src/
 import { buildStylePreview, clipStyleNotes, deriveStyleNotes, pickContentType } from '../src/application/style-preview'
 import { STYLE_NOTES_LIMIT, WORDS_PER_MINUTE } from '../src/shared/constants'
 import { countCopyWords } from '../src/renderer/src/lib/text'
-import { notesFromPfdbi, pfdbiFromNotes } from '../src/renderer/src/lib/pfdbi-notes'
+import { notesFromPfdbi, pfdbiFromNotes } from '../src/shared/pfdbi-notes'
+import {
+  PROJECT_BUNDLE_FORMAT,
+  PROJECT_EXPORT_LAYOUT,
+  isProjectBundle,
+  readProjectBundle,
+  sanitizeFolderName,
+  writeProjectBundle,
+  writeProjectBundleTo
+} from '../src/application/project-bundle'
+import { zipProjectFolder, unzipProjectPackage, resolveBundleRoot } from '../src/application/project-package'
+import { projectImageDir, isManagedImagePath, removeManagedImage, storeImage } from '../src/infrastructure/filesystem/image-store'
 
 describe('document parser', () => {
   it('counts chinese and latin words', () => {
@@ -851,6 +862,259 @@ describe('human pfdbi notes', () => {
     expect(analysis.D.observations).toEqual(['灯组收得更紧'])
     expect(notesFromPfdbi(analysis).P).toBe('姿态更低、更宽')
     expect(notesFromPfdbi(analysis).D).toBe('灯组收得更紧')
+  })
+})
+
+describe('reference image store', () => {
+  it('copies the source file into a per-project folder under the image root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-img-'))
+    const source = join(dir, 'car.png')
+    const root = join(dir, 'images')
+    try {
+      writeFileSync(source, 'fake-png')
+      const stored = storeImage(root, 'proj_1', 'img_1', source)
+      expect(stored).toBe(join(root, 'proj_1', 'img_1.png'))
+      expect(existsSync(stored)).toBe(true)
+      expect(readFileSync(stored, 'utf8')).toBe('fake-png')
+      expect(readFileSync(source, 'utf8')).toBe('fake-png')
+      expect(projectImageDir(root, 'proj_1')).toBe(join(root, 'proj_1'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not delete files that live outside the image root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-img-outside-'))
+    const root = join(dir, 'images')
+    const outside = join(dir, 'bundle', '01.png')
+    try {
+      mkdirSync(join(dir, 'bundle'), { recursive: true })
+      writeFileSync(outside, 'keep-png')
+      expect(isManagedImagePath(root, join(root, 'proj_1', 'a.png'))).toBe(true)
+      expect(isManagedImagePath(root, outside)).toBe(false)
+      removeManagedImage(root, outside)
+      expect(readFileSync(outside, 'utf8')).toBe('keep-png')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('project import/export bundle', () => {
+  it('keeps export folder names stable for later pack/unpack', () => {
+    expect(PROJECT_EXPORT_LAYOUT.imagesDir).toBe('参考图')
+    expect(PROJECT_EXPORT_LAYOUT.manifestFile).toBe('项目.json')
+  })
+
+  it('sanitizes Windows-illegal folder characters', () => {
+    expect(sanitizeFolderName('MINI/前脸:改款?*')).toBe('MINI 前脸 改款')
+  })
+
+  it('roundtrips topic, PFDBI notes and a copied reference image in a single manifest', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-bundle-'))
+    const source = join(dir, 'front.png')
+    try {
+      writeFileSync(source, 'fake-png')
+      const pfdbi = pfdbiFromNotes(
+        'MINI Cooper 前脸改了什么',
+        { P: '姿态更低、更宽', F: '', D: '灯组收得更紧', B: '', I: '' },
+        null
+      )
+      const folder = writeProjectBundle(dir, {
+        id: 'proj_mini',
+        title: 'MINI 前脸',
+        topic: 'MINI Cooper 前脸改了什么',
+        draft: '想讲灯组',
+        facts: '轴距 2495',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '车型解读',
+        pfdbi,
+        script: '这期我们看 MINI。',
+        images: [
+          {
+            file: '',
+            filename: 'front.png',
+            role: 'primary',
+            vehicleLabel: 'MINI',
+            comparisonNote: '主分析',
+            sourcePath: source
+          }
+        ]
+      })
+      expect(isProjectBundle(folder)).toBe(true)
+      expect(existsSync(join(folder, '选题.txt'))).toBe(false)
+      expect(existsSync(join(folder, '初稿文案.txt'))).toBe(false)
+      const meta = JSON.parse(readFileSync(join(folder, PROJECT_EXPORT_LAYOUT.manifestFile), 'utf8')) as {
+        format: string
+        formatVersion: number
+        idea: string
+        script: string
+        pfdbi: { P: string; D: string }
+        images: Array<{ file: string; vehicleLabel: string }>
+        id: string
+      }
+      expect(meta.format).toBe(PROJECT_BUNDLE_FORMAT)
+      expect(meta.formatVersion).toBe(3)
+      expect(meta.id).toBe('proj_mini')
+      expect(meta.idea).toBe('想讲灯组')
+      expect(meta.script).toBe('这期我们看 MINI。')
+      expect(meta.pfdbi.P).toBe('姿态更低、更宽')
+      expect(meta.pfdbi.D).toBe('灯组收得更紧')
+      expect(meta.images[0]?.vehicleLabel).toBe('MINI')
+      const round = readProjectBundle(folder)
+      expect(round.topic).toBe('MINI Cooper 前脸改了什么')
+      expect(round.draft).toBe('想讲灯组')
+      expect(round.facts).toBe('轴距 2495')
+      expect(round.script).toBe('这期我们看 MINI。')
+      expect(round.pfdbi?.P.judgement).toBe('姿态更低、更宽')
+      expect(round.pfdbi?.D.judgement).toBe('灯组收得更紧')
+      expect(round.images).toHaveLength(1)
+      expect(round.images[0]?.vehicleLabel).toBe('MINI')
+      expect(round.images[0]?.comparisonNote).toBe('主分析')
+      expect(readFileSync(round.images[0]?.sourcePath ?? '', 'utf8')).toBe('fake-png')
+      const again = writeProjectBundle(dir, {
+        ...round,
+        title: 'MINI 前脸'
+      })
+      expect(again).not.toBe(folder)
+      expect(isProjectBundle(again)).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('still imports the previous multi-txt export layout', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-legacy-bundle-'))
+    try {
+      mkdirSync(join(dir, '参考图'), { recursive: true })
+      writeFileSync(join(dir, '选题.txt'), '旧选题', 'utf8')
+      writeFileSync(join(dir, '初步想法.txt'), '旧想法', 'utf8')
+      writeFileSync(join(dir, '事实补充.txt'), '旧事实', 'utf8')
+      writeFileSync(join(dir, '初稿文案.txt'), '旧初稿', 'utf8')
+      writeFileSync(
+        join(dir, 'PFDBI分析.txt'),
+        'PFDBI 设计分析\n\nP 比例姿态\n更低更宽\n\nF 型面\n（空）\n',
+        'utf8'
+      )
+      writeFileSync(
+        join(dir, '项目.json'),
+        JSON.stringify({
+          format: PROJECT_BUNDLE_FORMAT,
+          formatVersion: 1,
+          title: '旧项目',
+          topic: '旧选题',
+          platform: 'B站',
+          durationSeconds: 180,
+          contentType: '车型解读',
+          images: []
+        }),
+        'utf8'
+      )
+      const round = readProjectBundle(dir)
+      expect(round.topic).toBe('旧选题')
+      expect(round.draft).toBe('旧想法')
+      expect(round.facts).toBe('旧事实')
+      expect(round.script).toBe('旧初稿')
+      expect(round.pfdbi?.P.judgement).toBe('更低更宽')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('overwrites the same folder and can write a reference image from a data URL', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-bundle-save-'))
+    try {
+      const folder = join(dir, '一期文案')
+      writeProjectBundleTo(folder, {
+        id: 'proj_save',
+        title: '一期文案',
+        topic: '选题',
+        draft: '初稿想法',
+        facts: '',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '车型解读',
+        pfdbi: null,
+        script: '第一版',
+        images: [
+          {
+            file: '',
+            filename: 'front.png',
+            role: 'primary',
+            vehicleLabel: 'MINI',
+            comparisonNote: '',
+            dataUrl: 'data:image/png;base64,ZmFrZS1wbmc='
+          }
+        ]
+      })
+      writeProjectBundleTo(folder, {
+        id: 'proj_save',
+        title: '一期文案',
+        topic: '选题',
+        draft: '改过的想法',
+        facts: '',
+        platform: 'B站',
+        durationSeconds: 180,
+        contentType: '车型解读',
+        pfdbi: null,
+        script: '第二版',
+        images: [
+          {
+            file: '',
+            filename: 'front.png',
+            role: 'primary',
+            vehicleLabel: 'MINI',
+            comparisonNote: '',
+            dataUrl: 'data:image/png;base64,ZmFrZS1wbmc='
+          }
+        ]
+      })
+      const round = readProjectBundle(folder)
+      expect(round.draft).toBe('改过的想法')
+      expect(round.script).toBe('第二版')
+      expect(round.images).toHaveLength(1)
+      expect(readFileSync(round.images[0]?.sourcePath ?? '', 'utf8')).toBe('fake-png')
+      writeProjectBundleTo(folder, {
+        ...round,
+        draft: '再改一次'
+      })
+      expect(readProjectBundle(folder).draft).toBe('再改一次')
+      expect(readFileSync(readProjectBundle(folder).images[0]?.sourcePath ?? '', 'utf8')).toBe('fake-png')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('zips a project folder and unpacks it back', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdw-zip-'))
+    try {
+      const folder = writeProjectBundle(dir, {
+        id: 'proj_zip',
+        title: '打包文案',
+        topic: '选题',
+        draft: '想法',
+        facts: '',
+        platform: 'B站',
+        durationSeconds: 120,
+        contentType: '设计观点',
+        pfdbi: null,
+        script: '正文',
+        images: []
+      })
+      const zipPath = join(dir, '打包文案.zip')
+      zipProjectFolder(folder, zipPath)
+      expect(existsSync(zipPath)).toBe(true)
+      const unpacked = join(dir, 'unpacked')
+      unzipProjectPackage(zipPath, unpacked)
+      const root = resolveBundleRoot(unpacked)
+      const round = readProjectBundle(root)
+      expect(round.topic).toBe('选题')
+      expect(round.script).toBe('正文')
+      expect(round.id).toBe('proj_zip')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

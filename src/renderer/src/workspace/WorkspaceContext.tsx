@@ -29,6 +29,7 @@ export interface WorkspaceBarConfig {
   titleOptions?: Array<{ id: string; label: string }>
   selectedTitleId?: string
   onTitleSelect?: (id: string) => void
+  saveStatus?: import('@shared/ipc').ProjectSaveStatus | null
 }
 
 interface WorkspaceContextValue {
@@ -82,7 +83,8 @@ export function useWorkspaceBar(config: WorkspaceBarConfig): void {
       onStageSelect: (id) => onStageSelectRef.current?.(id),
       titleOptions: config.titleOptions,
       selectedTitleId: config.selectedTitleId,
-      onTitleSelect: (id) => onTitleSelectRef.current?.(id)
+      onTitleSelect: (id) => onTitleSelectRef.current?.(id),
+      saveStatus: config.saveStatus
     })
   }, [
     config.parent?.to,
@@ -90,6 +92,7 @@ export function useWorkspaceBar(config: WorkspaceBarConfig): void {
     config.title,
     config.activeStage,
     config.selectedTitleId,
+    config.saveStatus,
     stagesKey,
     titlesKey,
     setConfig

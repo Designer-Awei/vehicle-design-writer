@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom'
 import { ACTIONS_SLOT_ID, useWorkspaceBarState } from '@renderer/workspace/WorkspaceContext'
+import { SAVE_STATUS_LABEL, normalizeSaveStatus } from '@renderer/lib/save-status'
 
 /**
- * 工作区顶栏：标题（可切换项目）与右侧操作。项目内二级标签改到左侧纵栏。
+ * 工作区顶栏：标题（可切换项目）、保存状态灯与右侧操作。
  */
 export function WorkspaceBar(): React.JSX.Element {
   const {
@@ -12,8 +13,10 @@ export function WorkspaceBar(): React.JSX.Element {
     onStageSelect,
     titleOptions,
     selectedTitleId,
-    onTitleSelect
+    onTitleSelect,
+    saveStatus
   } = useWorkspaceBarState()
+  const status = saveStatus ? normalizeSaveStatus(saveStatus) : null
 
   return (
     <header className="workspace-bar">
@@ -33,6 +36,12 @@ export function WorkspaceBar(): React.JSX.Element {
         </label>
       ) : title ? (
         <h1 className="workspace-title">{title}</h1>
+      ) : null}
+      {status ? (
+        <span className={`project-status project-status--${status}`} title={SAVE_STATUS_LABEL[status]}>
+          <span className="project-status-dot" aria-hidden />
+          {SAVE_STATUS_LABEL[status]}
+        </span>
       ) : null}
       {stages.length > 0 ? (
         <nav className="workspace-stages" aria-label="工作台导航">

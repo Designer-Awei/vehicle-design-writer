@@ -115,6 +115,8 @@ export interface StyleDetail extends StyleRecord {
   documents: StyleDocumentRecord[]
 }
 
+export type ProjectSaveStatus = 'unsaved' | 'dirty' | 'saved'
+
 export interface ProjectRecord {
   id: string
   title: string
@@ -129,6 +131,10 @@ export interface ProjectRecord {
   facts: string
   createdAt: string
   updatedAt: string
+  /** 已保存时指向 data/projects 下的项目文件夹。 */
+  folderPath?: string | null
+  /** 未保存 / 未更新 / 已保存。 */
+  saveStatus?: ProjectSaveStatus
 }
 
 export interface ReferenceImageRecord {
@@ -142,6 +148,8 @@ export interface ReferenceImageRecord {
   comparisonNote: string
   dataUrl: string
   annotations: ImageAnnotation[]
+  /** 本地源文件或已保存项目里的参考图路径。 */
+  sourcePath?: string
 }
 
 export interface ImageMetadataPatch {
@@ -204,6 +212,9 @@ export interface AppApi {
       textModel: string
       visionModel: string
     }) => Promise<LlmSettings>
+    pickProjectRoot: () => Promise<LlmSettings | null>
+    resetProjectRoot: () => Promise<LlmSettings>
+    openProjectRoot: () => Promise<string>
     listModels: () => Promise<string[]>
     getPlatforms: () => Promise<PlatformProfile[]>
     getDurations: () => Promise<DurationProfile[]>
@@ -258,7 +269,10 @@ export interface AppApi {
     generate: (projectId: string) => Promise<ProjectDetail>
     rewrite: (projectId: string, selectedText: string, instruction: string) => Promise<string>
     restoreVersion: (versionId: string) => Promise<ProjectDetail>
+    save: (projectId: string) => Promise<ProjectDetail>
     export: (projectId: string, format: 'txt' | 'md') => Promise<string | null>
+    exportBundle: (projectId: string) => Promise<string | null>
+    importBundle: () => Promise<ProjectDetail | null>
     remove: (id: string) => Promise<void>
   }
   dialog: {
@@ -276,6 +290,9 @@ export interface AppApi {
 export const IPC = {
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',
+  settingsPickProjectRoot: 'settings:pickProjectRoot',
+  settingsResetProjectRoot: 'settings:resetProjectRoot',
+  settingsOpenProjectRoot: 'settings:openProjectRoot',
   settingsModels: 'settings:models',
   settingsPlatforms: 'settings:platforms',
   settingsDurations: 'settings:durations',
@@ -310,7 +327,10 @@ export const IPC = {
   projectsGenerate: 'projects:generate',
   projectsRewrite: 'projects:rewrite',
   projectsRestoreVersion: 'projects:restoreVersion',
+  projectsSave: 'projects:save',
   projectsExport: 'projects:export',
+  projectsExportBundle: 'projects:exportBundle',
+  projectsImportBundle: 'projects:importBundle',
   projectsRemove: 'projects:remove',
   dialogFolder: 'dialog:folder',
   dialogImages: 'dialog:images',

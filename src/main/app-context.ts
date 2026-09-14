@@ -1,7 +1,7 @@
 import { config } from 'dotenv'
 import { join } from 'path'
 import { app } from 'electron'
-import { seedIfEmpty } from '@application/demo-seed'
+import { seedIfEmpty, migrateOrSeedProjects } from '@application/demo-seed'
 import { ModelRouter } from '@application/model-router'
 import { AppDatabase } from '@infrastructure/db/database'
 import { Repositories } from '@infrastructure/db/repositories'
@@ -10,11 +10,15 @@ import { SiliconFlowProvider } from '@infrastructure/llm/SiliconFlowProvider'
 import type { LLMProvider } from '@infrastructure/llm/types'
 import { decryptSecret, encryptSecret } from '@infrastructure/security/secret-store'
 import { DEFAULT_BASE_URL, DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL, LEGACY_DEFAULT_TEXT_MODEL } from '@shared/constants'
+import type { ProjectDetail } from '@shared/ipc'
+import { resolveProjectsRoot } from './paths'
 
 export interface AppContext {
   db: AppDatabase
   repos: Repositories
   userData: string
+  /** 尚未点保存、或已打开后改过但未写回磁盘的项目。 */
+  drafts: Map<string, ProjectDetail>
 }
 
 /**
@@ -27,7 +31,8 @@ export function createAppContext(): AppContext {
   const repos = new Repositories(db)
   hydrateSettingsFromEnv(repos)
   seedIfEmpty(repos)
-  return { db, repos, userData }
+  migrateOrSeedProjects(repos, resolveProjectsRoot(repos))
+  return { db, repos, userData, drafts: new Map() }
 }
 
 export function hydrateSettingsFromEnv(repos: Repositories): void {

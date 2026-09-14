@@ -13,7 +13,9 @@ export const LlmSettingsSchema = z.object({
   baseUrl: z.string().min(1),
   textModel: z.string().min(1),
   visionModel: z.string().min(1),
-  hasApiKey: z.boolean()
+  hasApiKey: z.boolean(),
+  projectRoot: z.string().min(1),
+  defaultProjectRoot: z.string().min(1)
 })
 
 export const DurationProfileSchema = z.object({
