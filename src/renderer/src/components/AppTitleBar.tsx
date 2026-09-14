@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react'
-import electronIcon from '@renderer/assets/electron.svg'
+import appIcon from '@renderer/assets/app-icon.png'
 
 const MENUS = [
   { id: 'file', label: 'File' },
@@ -26,7 +26,7 @@ export function AppTitleBar(): React.JSX.Element {
 
   return (
     <header className="app-titlebar">
-      <img className="app-titlebar-icon" src={electronIcon} alt="" draggable={false} />
+      <img className="app-titlebar-icon" src={appIcon} alt="汽车设计文案助手" draggable={false} />
       <span className="app-titlebar-name">汽车设计文案助手</span>
       <nav className="app-titlebar-menus" aria-label="应用菜单">
         {MENUS.map((item) => (

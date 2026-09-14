@@ -50,9 +50,13 @@ npm test
 
 ## 构建
 
+Windows 安装包：
+
 ```bash
 npm run build:win
 ```
+
+安装程序在 `dist/汽车设计文案助手-1.0.0-setup.exe`，可以自选安装路径。便携包是同目录的 `汽车设计文案助手-1.0.0-portable.zip`（或 `dist/win-unpacked`），里面只有可执行程序，不含安装包。
 
 ## SiliconFlow
 

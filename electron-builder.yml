@@ -1,6 +1,8 @@
 appId: com.vehicle-design-writer.app
-productName: vehicle-design-writer
+productName: 汽车设计文案助手
+copyright: Copyright © 2026
 directories:
+  output: dist
   buildResources: build
 files:
   - '!**/.vscode/*'
@@ -12,12 +14,32 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: vehicle-design-writer
+  icon: icon.ico
+  executableName: 汽车设计文案助手
+  artifactName: 汽车设计文案助手-${version}-portable.${ext}
+  requestedExecutionLevel: asInvoker
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  installerIcon: icon.ico
+  uninstallerIcon: icon.ico
+  installerHeaderIcon: icon.ico
   createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: 汽车设计文案助手
+  uninstallDisplayName: 汽车设计文案助手
+  deleteAppDataOnUninstall: false
+  differentialPackage: false
+  artifactName: 汽车设计文案助手-${version}-setup.${ext}
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -29,6 +51,7 @@ mac:
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  icon: icon.png
   target:
     - AppImage
     - snap
@@ -40,6 +63,3 @@ appImage:
 npmRebuild: false
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
-publish:
-  provider: generic
-  url: https://example.com/auto-updates

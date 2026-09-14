@@ -27,7 +27,7 @@ function createWindow(): void {
     title: '汽车设计文案助手',
     backgroundColor: '#0c0b0a',
     ...windowsChrome,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
